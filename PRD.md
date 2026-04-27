@@ -37,7 +37,7 @@ Extend the backend so workflows can declare task dependencies in YAML, run depen
 
 ## Implementation Decisions
 
-The sub-decisions below are the locked design. The spec note (`spec`) remains the canonical source of truth; if anything in this section drifts from the spec, the spec wins. Production-grade alternatives for every pragmatic choice live in `interview/design_decisions.md`.
+The sub-decisions below are the locked design. This PRD is the canonical document for the project. Production-grade alternatives for every pragmatic choice live in `interview/design_decisions.md`; per-objection prepared defenses live in the other `interview/*.md` notes.
 
 ### 1. Task dependencies are many-to-one
 
@@ -264,7 +264,8 @@ The following are explicitly out of scope. Production-grade alternatives for eve
 
 ## Further Notes
 
-- The **workspace spec note** (`spec`) is the canonical source of truth for design details — shapes, edge cases, validation rules, error codes, and rationale. This PRD is a high-level summary intended for reviewers and onboarding; if the two ever drift, the spec wins.
+- **This PRD is canonical.** It carries the locked design — user stories, decisions 1–13, testing strategy, and out-of-scope items. There is no other governing design document for this project.
 - **`interview/design_decisions.md`** holds the pragmatic-vs-production-grade trade-off bookkeeping (General Assumptions + per-Task sections), keeping the PRD focused on the chosen design.
+- **Per-objection prepared defenses** live alongside `design_decisions.md` (e.g. `interview/no-task-output-column.md`, `interview/no-lease-and-heartbeat.md`) and are linked from the relevant decision in this PRD or in `design_decisions.md`.
 - **Conventional commits, one per task.** Per `CLAUDE.md`, every implementation task lands as a single commit using conventional-commit format with PRD task / user-story references in the commit body. The git log is part of the project's documentation.
 - The original challenge brief (the verbatim "Coding Challenge Tasks for the Interviewee" sections 1–6) lives in `Readme.md` and is unchanged.
