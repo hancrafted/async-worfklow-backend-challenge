@@ -18,6 +18,14 @@ Whenever the decision is made to optimize for the scope of this coding challenge
 - Run `npm test` frequently during the TDD loop and at the very end of every task before declaring it complete. Fix the code on failure — never skip a failing test.
 - After each task is implemented, document in `/interview/manual_test_plan.md` how to manually test the implemented task step by step (one section per task).
 
+## Tests
+
+Tests are structured one folder per coding challenge task. E.g. /tests/01-polygon-area/
+For each original requirement in the Readme.md there is a exactly one test file.
+Test must cover happy path in one describe block and at least one error path in another describe block. The purpose is for the reviewer to make sure and understand that the test serve to fullfil the requirements for each task.
+
+Add inline comments explaining the test, if the test is longer than 10 lines.
+
 ## Quality gates (Husky)
 
 The repo has two layered git hooks. They are unbypassable for both humans and agents (verified — see PRD §Task 0).
