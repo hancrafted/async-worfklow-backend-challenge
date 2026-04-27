@@ -88,7 +88,7 @@ UUIDs are an internal detail. Anywhere a workflow's task structure is exposed to
 
 The existing `Result` entity remains the single source of truth for task outputs; we do **not** add a `Task.output` column. `Task.resultId` continues to link a task to its (at most one) `Result` row.
 
-- README task #1 says *"save the result in the output field of the task."* We interpret this as the **logical output** (the task's linkage to `Result.data` via `resultId`), not a literal `output` column on `Task`. Rationale and production-grade considerations live in `interview/design_decisions.md` under Task 1.
+- README task #1 says *"save the result in the output field of the task."* We interpret this as the **logical output** (the task's linkage to `Result.data` via `resultId`), not a literal `output` column on `Task`. Rationale and production-grade considerations live in `interview/design_decisions.md` under Task 1; the prepared defense for the "but the README literally says…" objection (README internal-consistency argument, four-layer rebuttal, when-to-cave conditions) lives in [`interview/no-task-output-column.md`](interview/no-task-output-column.md).
 
 ### 7. `Result` shape — separate `data` and `error` columns
 

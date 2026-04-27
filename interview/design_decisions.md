@@ -27,7 +27,7 @@ This document records pragmatic choices made for the scope of this coding challe
 
 ### Task 1 — PolygonAreaJob (README §1)
 
-- **Output storage.** Task output lives in the existing `Result.data` column rather than a new `Task.output` column. The README phrase *"save the result in the output field of the task"* is interpreted as the *logical* output (Task → Result via `resultId`). Rationale:
+- **Output storage.** Task output lives in the existing `Result.data` column rather than a new `Task.output` column. The README phrase *"save the result in the output field of the task"* is interpreted as the *logical* output (Task → Result via `resultId`). Full prepared defense — README internal-consistency argument, four-layer rebuttal, when-to-cave conditions — in [`no-task-output-column.md`](./no-task-output-column.md). Rationale:
   1. **Separation of concerns** — `tasks` is the hot, polled table; outputs can be large JSON blobs and don't belong on every poll.
   2. **Future-proof for retries / multiple attempts** — a production extension can record one `Result` per attempt without touching the task row.
   3. **Storage flexibility** — `Result` rows could later move to object storage keyed by `resultId` while `Task` stays in OLTP.
