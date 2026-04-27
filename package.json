@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@swc/core": "^1.15.32",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
@@ -33,11 +34,12 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.59.1",
+    "unplugin-swc": "^1.5.9",
     "vitest": "^2.1.9"
   },
   "lint-staged": {
     "*.ts": [
-      "eslint --fix --max-warnings=0",
+      "eslint --fix --max-warnings=0 --no-warn-ignored",
       "bash -c 'tsc --noEmit -p tsconfig.eslint.json'",
       "vitest related --run"
     ]

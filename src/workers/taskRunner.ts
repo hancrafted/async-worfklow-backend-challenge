@@ -12,6 +12,21 @@ export enum TaskStatus {
     Failed = 'failed'
 }
 
+const MAX_STACK_LINES = 10;
+
+interface SerializedJobError {
+    message: string;
+    reason: 'job_error';
+    stack: string;
+}
+
+function serializeJobError(error: unknown): SerializedJobError {
+    const message = error instanceof Error ? error.message : String(error);
+    const rawStack = error instanceof Error && error.stack ? error.stack : '';
+    const stack = rawStack.split('\n').slice(0, MAX_STACK_LINES).join('\n');
+    return { message, reason: 'job_error', stack };
+}
+
 export class TaskRunner {
     constructor(
         private taskRepository: Repository<Task>,
@@ -45,6 +60,15 @@ export class TaskRunner {
         } catch (error: any) {
             console.error(`Error running job ${task.taskType} for task ${task.taskId}:`, error);
 
+            const errorRecord = serializeJobError(error);
+            const resultRepository = this.taskRepository.manager.getRepository(Result);
+            const failureResult = new Result();
+            failureResult.taskId = task.taskId!;
+            failureResult.data = null;
+            failureResult.error = JSON.stringify(errorRecord);
+            await resultRepository.save(failureResult);
+
+            task.resultId = failureResult.resultId!;
             task.status = TaskStatus.Failed;
             task.progress = null;
             await this.taskRepository.save(task);

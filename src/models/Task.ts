@@ -13,7 +13,7 @@ export class Task {
     @Column('text')
     geoJson!: string;
 
-    @Column()
+    @Column({ type: 'varchar' })
     status!: TaskStatus;
 
     @Column({ nullable: true, type: 'text' })
