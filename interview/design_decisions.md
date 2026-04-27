@@ -25,6 +25,23 @@ This document records pragmatic choices made for the scope of this coding challe
 
 ## Per-Task Decisions
 
+### Task 0 — Test Harness & Quality Gates (PRD §Task 0)
+
+- **Vitest over Jest.** Faster cold start, native ESM/TS, identical mocking surface for the scope we need. No production-grade alternative — Vitest is also production-grade.
+- **Manual drain over real / fake timers in integration tests.** Tests invoke the worker tick synchronously in a loop until the queue empties, instead of letting the production 5s sleep elapse or stubbing it with fake timers. Rejected alternatives:
+  - *Real timers:* turns a 50ms test into a 5s test; unworkable for a >50-test suite.
+  - *Fake timers:* leaks Vitest's `vi.useFakeTimers()` into worker code paths and forces every async primitive in the runner (timers, promises, queue microtasks) to be aware of the fake clock. Brittle.
+  - *Production-grade:* tests use real timers; the worker pool is replaced by an external queue (Redis Streams / SQS) whose driver exposes a synchronous "drain" hook for integration testing.
+- **Husky pre-commit + pre-push, layered.** Pre-commit runs `lint-staged` (ESLint + `tsc --noEmit` + `vitest related --run`) on staged `*.ts` only — fast enough that auto-commit on doc edits stays cheap, fast enough on code edits to not discourage atomic commits. Pre-push runs the full `npm test` suite. Branch B verification confirmed both raw `git commit` and the workspace's `agentCommit` API respect the hooks; the hook is an unbypassable gate for the agent.
+  - *Production-grade:* CI-on-PR (GitHub Actions) is the real gate. Local hooks are a faster shadow of CI for the developer (and agent) feedback loop. CI is out of scope for this single-developer challenge; if this were a team repo, the hooks would stay (cheap local feedback) and CI would back them up (authoritative gate).
+- **`--no-verify` is forbidden.** Reflected in `CLAUDE.md` for the implementor subagents. The hook contract is one-way: a hook failure means fix the code, not skip the hook.
+- **ESLint rule baseline.** TypeScript-ESLint with the rules the agent most commonly violates promoted to `error`:
+  - `@typescript-eslint/no-unused-vars`, `@typescript-eslint/no-explicit-any`, `@typescript-eslint/explicit-function-return-type` (exported functions only)
+  - `complexity: ["error", 10]`, `max-lines-per-function: ["error", 80]`, `max-depth: ["error", 4]`
+  - `no-console: ["error", { allow: ["warn", "error"] }]` — production logs go through the JSON-line wrapper, not bare `console.log`.
+  - `tests/**` overrides relax `max-lines-per-function`, `complexity`, and `no-explicit-any` (test fixtures legitimately use loose types).
+  - *Production-grade:* same baseline plus `eslint-plugin-import` for boundary enforcement, `eslint-plugin-security`, and a custom rule prohibiting direct `Repository.save()` outside the runner's transaction helper.
+
 ### Task 1 — PolygonAreaJob (README §1)
 
 - **Output storage.** Task output lives in the existing `Result.data` column rather than a new `Task.output` column. The README phrase *"save the result in the output field of the task"* is interpreted as the *logical* output (Task → Result via `resultId`). Full prepared defense — README internal-consistency argument, four-layer rebuttal, when-to-cave conditions — in [`no-task-output-column.md`](./no-task-output-column.md). Rationale:

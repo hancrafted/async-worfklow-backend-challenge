@@ -237,16 +237,47 @@ The DB is reset on every process restart (TypeORM `synchronize: true` against a 
 - **Behavior:** `SIGINT` / `SIGTERM` cause `process.exit` (no drain). HTTP server and workers are killed immediately.
 - **Implication:** in-flight tasks during shutdown are abandoned; their state is irrelevant because the next boot starts from an empty DB.
 
-## Testing Decisions
+## Task 0 — Test Harness & Quality Gates
 
-- **TDD-first.** Per the project's `CLAUDE.md`, the implementor agent uses the `/tdd` skill (red → green → refactor) for every implementation task. Tests are written before the production code that satisfies them.
-- **Vitest is the test framework.** `npm test` is the canonical command — run frequently during development and always before committing a task. The harness is set up as the very first implementor task because the starter has no tests yet.
+Task 0 is the bootstrap task: the starter ships no tests, no linter, and no commit gating. It is implemented before Task 1. Its deliverables:
+
+### Test framework
+
+- **Vitest.** `npm test` runs the full suite (`vitest run`) and is the canonical pre-push command.
+- **TDD-first.** Every subsequent task uses the `/tdd` skill (red → green → refactor). Tests are written before the production code that satisfies them.
 - **Test external behavior, not implementation details.** A test asserts what an outside observer can see — task status transitions visible via `/status`, the shape of `finalResult` via `/results`, the HTTP error body of a malformed request — and avoids coupling to private method names or internal call sequences.
+- **Manual drain over polling.** Integration tests invoke the worker tick synchronously in a loop until the queue is empty, instead of waiting for the production 5s sleep. See `interview/design_decisions.md` Task 0 for the rejected alternatives (real timers, fake timers).
 - **Module coverage:**
   - **Unit tests** for the polygon-area and report-generation jobs (success + error paths), the workflow-factory dependency validator (missing-step, cycle, self-dep, duplicate stepNumber, unknown taskType), the runner's promotion / sweep / `finalResult` write logic, and the dependency-envelope builder.
   - **Integration tests** for the worker-pool atomic-claim race (multiple workers, one queued task), the end-to-end YAML → workflow → tasks → `finalResult` round-trip via HTTP, the status and results endpoints (success + 400 + 404 cases), the fail-fast sweep behavior, and the unified error-response shape.
 - **Test fixtures.** New workflow fixtures live in `tests/test-workflows/`. The HTTP `POST /analysis` endpoint stays hardcoded to load `src/workflows/example_workflow.yml`; tests load other YAMLs directly via `WorkflowFactory`.
-- **Manual test plan.** Per `CLAUDE.md`, after each implementation task the implementor documents the manual verification steps in `interview/manual_test_plan.md` (one section per task).
+
+### Quality gates (Husky)
+
+Two layers, scoped by cost:
+
+- **`pre-commit` — fast, scoped to staged files.** Runs `lint-staged`:
+  - on staged `*.ts`: `eslint --fix` then `vitest related --run --passWithNoTests` (only tests touching the staged file's import graph).
+  - once if any `*.ts` is staged: `tsc --noEmit -p tsconfig.json` (whole-project type-check; catches cross-cutting type breakage that file-scoped `vitest related` would miss).
+  - Doc-only commits (`*.md`, `*.yml` outside `src/workflows/`) are no-ops — the gate stays cheap on planning commits.
+- **`pre-push` — full suite.** Runs `npm test` (full Vitest suite + lint). Push is the right granularity for the full run: it catches the case where a sequence of green per-commit gates accumulates a regression that only shows up across the whole codebase.
+
+Branch B has been verified empirically: both raw `git commit` and the workspace's `agentCommit` pathway respect Husky hooks. The hook is an unbypassable gate for the agent. See `interview/design_decisions.md` Task 0 for the production-grade alternative (CI-on-PR) and the reasoning for choosing local hooks instead within this challenge's scope.
+
+### Linting
+
+- **ESLint** with TypeScript support, using the project's existing `tsconfig.json`. Configured to error on the rules the agent most commonly violates: unused imports/vars, `any` without justification, missing return types on exported functions, and complexity thresholds (`max-lines-per-function`, `complexity`) — with relaxed thresholds in `tests/**`.
+- Detailed rule list and thresholds live in `interview/design_decisions.md` Task 0.
+
+### Subagent rule (handed to every implementor)
+
+Carried in `CLAUDE.md` (auto-loaded by every delegated subagent) and reproduced here so the contract is visible in the PRD:
+
+> Run `npm test` at the end of each task, before declaring it complete. The pre-commit hook runs only fast checks on staged files (type-check, lint, related tests); the pre-push hook runs the full suite — but neither hook is a substitute for running tests during the TDD red-green-refactor loop. Treat hook failures as blocking. **Do not bypass any hook with `--no-verify`.** If a hook reports a real failure, fix it. If it reports an environmental issue (missing dependency, broken hook script), surface it to the parent agent rather than disabling the hook.
+
+### Manual test plan
+
+Per `CLAUDE.md`, after each implementation task the implementor appends a section to `interview/manual_test_plan.md` documenting the curl/HTTP steps to manually verify the task end-to-end.
 
 ## Out of Scope
 
