@@ -1,7 +1,11 @@
 {
   "scripts": {
     "start": "ts-node src/index.ts",
-    "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts"
+    "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
+    "test": "vitest run",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit -p tsconfig.eslint.json",
+    "prepare": "husky"
   },
   "dependencies": {
     "@turf/turf": "^7.1.0",
@@ -16,13 +20,26 @@
     "typeorm": "^0.3.20"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.1",
+    "eslint": "^10.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "nodemon": "^3.1.7",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.59.1",
+    "vitest": "^2.1.9"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix --max-warnings=0",
+      "bash -c 'tsc --noEmit -p tsconfig.eslint.json'",
+      "vitest related --run"
+    ]
   }
 }
