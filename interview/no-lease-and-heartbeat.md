@@ -23,10 +23,10 @@ UPDATE tasks
 It protects against three failure modes:
 
 | Failure mode | Does it apply in this scope? |
-|---|---|
-| Process crash leaves orphaned `in_progress` rows | **No** — `dropSchema: true` wipes the DB on restart. There is nothing to recover. |
-| Worker coroutine throws mid-task | **No** — the per-worker `try/catch` (PRD §11) marks the task `failed`. State is correct without a lease. |
-| Worker coroutine **hangs** (unresolved promise / infinite loop) | **Yes**, but a per-job timeout is a more targeted fix (Layer 4). |
+| --- | --- |
+| Process crash leaves orphaned in_progress rows | No — dropSchema: true wipes the DB on restart. There is nothing to recover. |
+| Worker coroutine throws mid-task | No — the per-worker try/catch (PRD §11) marks the task failed. State is correct without a lease. |
+| Worker coroutine hangs (unresolved promise / infinite loop) | Yes, but a per-job timeout is a more targeted fix (Layer 4). |
 
 So a lease here is solving 1-of-3 cases, and that 1 has a better answer.
 
@@ -45,13 +45,13 @@ Once a TTL exists, a *legitimately long-running* job that exceeds the lease gets
 
 ### Layer 3 — the production-grade upgrade path is already documented
 
-`interview/design_decisions.md` General Assumptions already names the production-grade replacement: *"persistent DB + TypeORM migrations + boot-time recovery sweep that resets stale `in_progress` rows older than the worker heartbeat back to `queued`."* That's a heartbeat-lease, gated on dropping `dropSchema: true`. The pragmatic-now / lease-later trade-off is on the page, consistent with the `CLAUDE.md` rubric ("strike a balance between a pragmatic solution scoped to this coding challenge setup and a production grade solution").
+`interview/design_decisions.md` General Assumptions already names the production-grade replacement: *"persistent DB + TypeORM migrations + boot-time recovery sweep that resets stale *`in_progress`* rows older than the worker heartbeat back to *`queued`*."* That's a heartbeat-lease, gated on dropping `dropSchema: true`. The pragmatic-now / lease-later trade-off is on the page, consistent with the `CLAUDE.md` rubric ("strike a balance between a pragmatic solution scoped to this coding challenge setup and a production grade solution").
 
 ### Layer 4 — the right answer to "what about a hung worker?" is a per-job timeout, not a lease
 
 If the interviewer asks *"what if a job hangs forever?"*, the cleanest answer is **not** "we'd add a lease." It is:
 
-> "A `Promise.race(job, rejectAfter(timeoutMs))` per invocation. The race rejects past the timeout, the worker's `try/catch` (PRD §11) catches it as `job_error`, the task transitions to `failed`, and the worker keeps claiming. That handles intra-process hangs precisely, with no double-execution surface, no TTL guesswork, and no idempotency requirement on jobs."
+> "A Promise.race(job, rejectAfter(timeoutMs)) per invocation. The race rejects past the timeout, the worker's try/catch (PRD §11) catches it as job_error, the task transitions to failed, and the worker keeps claiming. That handles intra-process hangs precisely, with no double-execution surface, no TTL guesswork, and no idempotency requirement on jobs."
 
 A lease-without-heartbeat is a coarser, more dangerous version of what a per-job timeout already gives you. If the underlying question is *"how do you recover from hangs?"*, the per-job timeout is the right tool; the lease is the wrong tool.
 
@@ -59,7 +59,7 @@ A lease-without-heartbeat is a coarser, more dangerous version of what a per-job
 
 Two narrow conditions, both off the table here:
 
-1. **Persistent DB without `dropSchema`.** Orphaned `in_progress` rows survive reboots; you need a recovery story. The right one is **boot-time sweep + heartbeat-refreshed lease**, not naive TTL-lease — heartbeat refresh is what lets legitimately long jobs not get killed mid-run.
+1. **Persistent DB without **`dropSchema`**.** Orphaned `in_progress` rows survive reboots; you need a recovery story. The right one is **boot-time sweep + heartbeat-refreshed lease**, not naive TTL-lease — heartbeat refresh is what lets legitimately long jobs not get killed mid-run.
 2. **Multi-process / distributed workers.** A coordinator-side claim with a lease becomes meaningful when claims have to survive worker hosts dying. We are explicitly single-process (PRD §10).
 
 Neither condition holds. Add neither.
