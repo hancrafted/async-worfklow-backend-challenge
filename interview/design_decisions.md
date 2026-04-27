@@ -6,7 +6,7 @@ This document records pragmatic choices made for the scope of this coding challe
 
 - **Single-process Node, in-process worker pool.** Default `N=3`, override via `WORKER_POOL_SIZE`. All workers share one `AppDataSource` and run as coroutines on the same event loop.
   - *Production-grade:* horizontal scaling via N processes / containers; cross-process claim via a DB advisory lock or an external queue (Redis Streams, SQS, RabbitMQ).
-- **Fresh SQLite DB on every restart** (`synchronize: true` against a file that is reset on boot). No migrations, no claim recovery.
+- **Fresh SQLite DB on every restart** (`synchronize: true` against a file that is reset on boot). No migrations, no claim recovery, no lease/heartbeat on `in_progress` rows. Prepared defense for the *"where's the lease?"* objection — including the four-layer rebuttal, when-to-add-a-lease conditions, and why a per-job timeout is the right answer to hangs — lives in [`no-lease-and-hearbeat.md`](./no-lease-and-hearbeat.md).
   - *Production-grade:* persistent DB + TypeORM migrations + boot-time recovery sweep that resets stale `in_progress` rows older than the worker heartbeat back to `queued`.
 - **No graceful shutdown.** `SIGINT` / `SIGTERM` cause `process.exit` immediately. In-flight tasks during shutdown are abandoned; the next boot starts from an empty DB so their state is irrelevant.
   - *Production-grade:* drain workers, refuse new claims, wait for in-flight tasks up to a configurable timeout, then exit.
