@@ -50,9 +50,10 @@ A task can depend on multiple prior tasks. Once **all** declared dependencies ar
 
 When any task transitions to `failed`, the workflow halts: the runner sweeps every `waiting`/`queued` sibling to `skipped` in the same post-task transaction, and the workflow itself transitions to `failed`.
 
+- **Sweep scope is workflow-wide, not branch-local.** Every `waiting` or `queued` task in the *entire* workflow is swept — including tasks with no dependency relationship to the failed task. Branch-local halt (skip only transitive descendants of the failed task) is the production-grade alternative documented in `interview/design_decisions.md` Task 3; for this scope the workflow-wide sweep keeps the query a single indexed `UPDATE` and keeps `failedAtStep` semantically clean (everything past the cut-off is `skipped`).
 - **`skipped` is a new terminal `TaskStatus`.** Skipped tasks produce no `Result` row — the status itself is the explanation.
 - **Sweep mechanism:** `UPDATE tasks SET status='skipped' WHERE workflowId=? AND status IN ('waiting','queued')`. Naturally idempotent — a second concurrently-failing task's sweep is a no-op.
-- **In-progress tasks are not cancelled.** Jobs are async functions on a shared event loop with no cancellation interface; they run to completion. The workflow stays `failed` regardless of their outcome.
+- **In-progress tasks are not cancelled.** Jobs are async functions on a shared event loop with no cancellation interface; they run to completion. The workflow stays `failed` regardless of their outcome — and an `in_progress` task at the moment of the sweep can still terminate as `completed` (its `Result.data` is preserved).
 - **No `dependency_failed` reason.** A dep can only ever be `completed` by the time its dependents become eligible — otherwise the workflow has aborted and the dependent is `skipped`.
 
 ### 3. Eager dependency resolution
