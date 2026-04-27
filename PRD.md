@@ -57,9 +57,14 @@ When any task transitions to `failed`, the workflow halts: the runner sweeps eve
 
 ### 3. Eager dependency resolution
 
-`Task.dependsOn` stores **taskIds** (UUIDs), resolved from YAML `stepNumber`s once when the workflow is created.
+`Task.dependsOn` stores **taskIds** (UUIDs), resolved from YAML `stepNumber`s once when the workflow is created. UUIDs are minted in application code (`uuid` v4) — `@PrimaryGeneratedColumn('uuid')` on `Workflow` and `Task` acts as a default and is skipped when the column is already set, so entity definitions are unchanged.
 
-- **WorkflowFactory** does a two-pass save: first create all tasks with empty deps to capture the `stepNumber → taskId` map, then resolve each task's `dependsOn` step numbers to taskIds and save again.
+- **Single-pass save inside one transaction.** `WorkflowFactory` runs:
+  1. Parse YAML.
+  2. Validate purely in-memory (missing-step refs, cycles, self-deps, duplicate `stepNumber`, unknown `taskType`) — no DB is touched on a 4xx.
+  3. Mint a `stepNumber → taskId` map by generating a UUID per step (and a UUID for `workflowId`).
+  4. Build the `Workflow` and all `Task` entities with `dependsOn` already resolved to UUIDs.
+  5. Persist workflow + tasks atomically inside `dataSource.transaction(...)`. Either the caller gets a `400` with no DB state, or a `202` with a fully-formed workflow — there is no partial state.
 - **Validation at creation time** (returns `400` to the API caller if violated):
   - Every referenced `stepNumber` must exist in the workflow → `{ error: "INVALID_DEPENDENCY", message: "Step N references non-existent step M" }`
   - The dependency graph must be a DAG (no cycles, no self-deps) → `{ error: "DEPENDENCY_CYCLE", message: "Cycle detected: 2 → 3 → 2" }`
