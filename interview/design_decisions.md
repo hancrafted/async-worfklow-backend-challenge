@@ -35,12 +35,56 @@ This document records pragmatic choices made for the scope of this coding challe
 - **Husky pre-commit + pre-push, layered.** Pre-commit runs `lint-staged` (ESLint + `tsc --noEmit` + `vitest related --run`) on staged `*.ts` only — fast enough that auto-commit on doc edits stays cheap, fast enough on code edits to not discourage atomic commits. Pre-push runs the full `npm test` suite. Branch B verification confirmed both raw `git commit` and the workspace's `agentCommit` API respect the hooks; the hook is an unbypassable gate for the agent.
   - *Production-grade:* CI-on-PR (GitHub Actions) is the real gate. Local hooks are a faster shadow of CI for the developer (and agent) feedback loop. CI is out of scope for this single-developer challenge; if this were a team repo, the hooks would stay (cheap local feedback) and CI would back them up (authoritative gate).
 - **`--no-verify` is forbidden.** Reflected in `CLAUDE.md` for the implementor subagents. The hook contract is one-way: a hook failure means fix the code, not skip the hook.
-- **ESLint rule baseline.** TypeScript-ESLint with the rules the agent most commonly violates promoted to `error`:
-  - `@typescript-eslint/no-unused-vars`, `@typescript-eslint/no-explicit-any`, `@typescript-eslint/explicit-function-return-type` (exported functions only)
-  - `complexity: ["error", 10]`, `max-lines-per-function: ["error", 80]`, `max-depth: ["error", 4]`
-  - `no-console: ["error", { allow: ["warn", "error"] }]` — production logs go through the JSON-line wrapper, not bare `console.log`.
-  - `tests/**` overrides relax `max-lines-per-function`, `complexity`, and `no-explicit-any` (test fixtures legitimately use loose types).
-  - *Production-grade:* same baseline plus `eslint-plugin-import` for boundary enforcement, `eslint-plugin-security`, and a custom rule prohibiting direct `Repository.save()` outside the runner's transaction helper.
+- **ESLint rule lock-in.** TypeScript-ESLint flat config (ESLint 9). Rules organized by intent. Locked thresholds — values chosen on the principle that hitting a limit is a refactor signal, not an annoyance. If a rule fires more than twice in Tasks 0–1 we revisit; pre-relaxing buys optionality we may not need.
+
+  **Type safety:**
+  - `@typescript-eslint/no-explicit-any`: `error`, `{ ignoreRestArgs: true }` — forces `unknown` + narrowing; `ignoreRestArgs` permits the logger's `(...args: any[])` forwarding.
+  - `@typescript-eslint/explicit-module-boundary-types`: `error` — return types on exported functions only; lighter than `explicit-function-return-type`.
+  - `@typescript-eslint/no-non-null-assertion`: `warn` — `!` is sometimes legitimate after explicit existence checks; warn keeps it deliberate.
+  - `@typescript-eslint/no-unused-vars`: `error`, `{ argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }`.
+  - `@typescript-eslint/consistent-type-imports`: `error`, `{ prefer: "type-imports" }`.
+
+  **Async correctness (the agent's biggest risk area — these are non-negotiable):**
+  - `@typescript-eslint/no-floating-promises`: `error` — catches `repository.save(task)` without `await` in the worker loop.
+  - `@typescript-eslint/no-misused-promises`: `error`, `{ checksVoidReturn: { arguments: false } }` — carve-out lets async functions be passed as Express middleware.
+  - `@typescript-eslint/await-thenable`: `error`.
+  - `@typescript-eslint/return-await`: `["error", "in-try-catch"]`.
+  - `@typescript-eslint/require-await`: `off` — too noisy; async-without-await is legitimate (e.g. uniform job signatures).
+
+  **Complexity caps (locked):**
+  - `complexity`: `["error", 10]` — McCabe default. Most likely flashpoint is `JobFactory.create(taskType)` and the runner's post-task transition logic; if it bites we extract, not relax.
+  - `max-lines-per-function`: `["error", { max: 80, skipBlankLines: true, skipComments: true }]` — code-only count; fits a runner method that does txn-open + claim + dispatch + result-write + sweep + txn-commit comfortably.
+  - `max-lines`: `["error", { max: 350, skipBlankLines: true, skipComments: true }]`.
+  - `max-depth`: `["error", 4]`.
+  - `max-params`: `["error", 4]` — 5+ params → take a typed object (the `JobContext` pattern).
+  - `max-nested-callbacks`: `["error", 3]`.
+
+  **Code style:**
+  - `eqeqeq`: `["error", "smart"]` — `===` always except `== null` for combined null/undefined check.
+  - `no-var`: `error`.
+  - `prefer-const`: `error`.
+  - `no-console`: `["error", { allow: ["warn", "error"] }]` — production logs go through the JSON-line wrapper.
+  - `no-throw-literal`: `error` — preserves stack traces.
+
+  **Test file overrides** (`tests/**`, `**/*.test.ts`, `**/*.spec.ts`):
+  - All complexity caps off (`complexity`, `max-lines-per-function`, `max-lines`, `max-depth`, `max-params`, `max-nested-callbacks`) — `describe` blocks legitimately get long.
+  - `@typescript-eslint/no-explicit-any`: `off` — fixtures use deliberately loose types.
+  - `@typescript-eslint/no-non-null-assertion`: `off` — `result!.field` after a null-check assertion is idiomatic test-code.
+  - `@typescript-eslint/explicit-module-boundary-types`: `off`.
+  - `no-console`: `off`.
+
+  **Config / script file overrides** (`*.config.ts`, `*.config.mjs`, `vitest.config.ts`):
+  - `@typescript-eslint/explicit-module-boundary-types`: `off`.
+  - `no-console`: `off`.
+
+  **TypeScript-ESLint needs a wider tsconfig.** The repo's `tsconfig.json` has `"include": ["src"]` and `"rootDir": "./src"`, so the linter cannot type-check `tests/**` without help. Task 0 adds a `tsconfig.eslint.json` that extends `tsconfig.json`, drops `rootDir`, and includes `["src", "tests", "*.config.ts"]`. The pre-commit `tsc --noEmit` invocation points at that file; the production `tsc` build keeps using `tsconfig.json`.
+
+  **Deliberately not added** (and why):
+  - `eslint-plugin-import`: agent's import sins are unused-only, already covered by `no-unused-vars`. The plugin's perf cost isn't earned.
+  - `prefer-readonly` on class properties: TypeORM entity classes use mutable properties; the rule would either force `// eslint-disable` on every entity field or be globally disabled.
+  - Custom rule prohibiting direct `Repository.save()` outside the runner's transaction helper: writing a custom rule for one repo is overkill; the integration tests around the claim race + code review are cheaper enforcement.
+
+  *Production-grade:* same baseline plus `eslint-plugin-import` for boundary/cycle enforcement, `eslint-plugin-security` for crypto/regex/eval lints, the custom `Repository.save` rule above, and `eslint-plugin-sonarjs` for cognitive-complexity checks that complement raw McCabe.
 
 ### Task 1 — PolygonAreaJob (README §1)
 
