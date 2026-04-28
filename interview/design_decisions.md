@@ -153,6 +153,9 @@ This document records pragmatic choices made for the scope of this coding challe
 
 - **Lightweight payload.** Workflow status + per-task list keyed by `stepNumber`. No payloads (`output`, full error messages); `/status` is for progress tracking, not data retrieval. `failureReason` appears only on `failed` tasks (only value: `job_error`); skipped tasks need no reason — the status itself is the explanation.
   - *Production-grade:* SSE or WebSocket push for real-time progress updates; ETag caching on the GET; per-step duration timestamps.
+- **New `src/routes/workflowRoutes.ts` mounted at `/workflow` from `src/index.ts`** (rather than extending `analysisRoutes.ts`). Task 6 (`/workflow/:id/results`) lands alongside `/status` on the same prefix; co-locating them in one router keeps the URL family in one place and avoids a circular cross-prefix import. The `dependsOn` taskId-to-stepNumber translator lives as an exported pure function in the same file (≈20 lines) and is unit-tested in isolation under `tests/05-workflow-status/dependson-translator.unit.test.ts` — extracting to its own module would buy nothing, since the route handler is the only caller.
+  - *Production-grade:* same shape; in a larger codebase the translator might move to `src/workflows/` next to `synthesizeFinalResult` if it sprouts caching or batching.
+- **Read-only handler — no lifecycle advance.** The handler issues a single `findOne({ relations: ['tasks'] })` and projects the response. Workflow lifecycle is driven exclusively by the post-task transaction (PRD §Decision 8); `/status` only reads. Lazy patches (Task 6's `finalResult` fill-on-read) belong on `/results`, not here.
 
 ### Task 6 — `/workflow/:id/results` (README §6)
 
