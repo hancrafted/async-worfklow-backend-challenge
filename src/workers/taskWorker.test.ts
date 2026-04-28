@@ -409,9 +409,9 @@ describe("startWorkerPool — N coroutines share Repository + StopSignal (US17, 
 // PRD §10 — env validation for WORKER_POOL_SIZE, fail-fast at boot.
 describe("resolveWorkerPoolSize — env validation (US17 boot contract)", () => {
   describe("happy path", () => {
-    it("returns the default (1) when WORKER_POOL_SIZE is unset or empty", () => {
-      expect(resolveWorkerPoolSize(undefined)).toBe(1);
-      expect(resolveWorkerPoolSize("")).toBe(1);
+    it("returns the default (3) when WORKER_POOL_SIZE is unset or empty", () => {
+      expect(resolveWorkerPoolSize(undefined)).toBe(3);
+      expect(resolveWorkerPoolSize("")).toBe(3);
     });
 
     it("returns the parsed positive integer when WORKER_POOL_SIZE is well-formed", () => {

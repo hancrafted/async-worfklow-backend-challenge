@@ -22,6 +22,18 @@ describe("EmailNotificationJob — JobContext signature (PRD §Decision 5)", () 
         job.run({ task: makeTask(), dependencies: [] }),
       ).resolves.not.toThrow();
     });
+
+    it("simulates at least 1000ms of work (Issue #17 Wave 3 latency contract)", async () => {
+      // Issue #17 Wave 3: with per-worker DataSources + WAL, the test
+      // substrate no longer serialises notifications behind the drainPool
+      // mutex, so the simulated latency can rise from 500ms to ≥1000ms
+      // without breaking integration timeouts. Pinning the floor here so a
+      // future drop back to 500ms regresses visibly.
+      const job = new EmailNotificationJob();
+      const startedAt = Date.now();
+      await job.run({ task: makeTask(), dependencies: [] });
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1000);
+    });
   });
 
   describe("error path", () => {
