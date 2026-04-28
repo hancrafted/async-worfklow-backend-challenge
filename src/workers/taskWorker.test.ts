@@ -1,4 +1,7 @@
 import "reflect-metadata";
+import * as path from "path";
+import * as os from "os";
+import * as fs from "fs";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DataSource, type Repository } from "typeorm";
 import {
@@ -17,6 +20,7 @@ import { Workflow } from "../models/Workflow";
 import { WorkflowStatus } from "../workflows/WorkflowFactory";
 import { LogLevel } from "../utils/logger";
 import type { Job } from "../jobs/Job";
+import { buildAppDataSource, buildWorkerDataSource } from "../data-source";
 
 // `tickOnce` calls `getJobForTaskType` indirectly via TaskRunner. Mock the
 // factory so the unit test stays self-contained and the spy job is fast.
@@ -110,25 +114,54 @@ describe("tickOnce — atomic-claim worker tick (PRD §10)", () => {
       // spy job counter confirms the winning task ran exactly once — proving
       // the atomic claim composes correctly under N>2 contention as the
       // worker pool wave (Wave 3 / US17 / US18) requires.
-      let runCount = 0;
-      const countingJob: Job = {
-        run: async () => {
-          runCount += 1;
-          return { ok: true };
-        },
-      };
-      getJobMock.mockReturnValue(countingJob);
-      await seedQueuedTask(dataSource);
+      //
+      // Substrate (Issue #17 Wave 2): each concurrent caller MUST own its
+      // own DataSource against a shared file-backed SQLite (WAL on, 5s
+      // busy_timeout). Sharing one in-memory connection corrupts SAVEPOINT
+      // state under concurrent `manager.transaction(...)` and trips
+      // `SQLITE_ERROR: no such savepoint: typeorm_2` at random — see
+      // `interview/manual_test_plan/17b_test-substrate-de-mutex.md`.
+      const dbDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "race-n3-"));
+      const dbPath = path.join(dbDirectory, "race.sqlite");
+      const bootstrapDataSource = buildAppDataSource({
+        databasePath: dbPath,
+        dropSchema: true,
+      });
+      await bootstrapDataSource.initialize();
+      const racerDataSources: DataSource[] = [];
+      try {
+        let runCount = 0;
+        const countingJob: Job = {
+          run: async () => {
+            runCount += 1;
+            return { ok: true };
+          },
+        };
+        getJobMock.mockReturnValue(countingJob);
+        await seedQueuedTask(bootstrapDataSource);
 
-      const results = await Promise.all([
-        tickOnce(taskRepository),
-        tickOnce(taskRepository),
-        tickOnce(taskRepository),
-      ]);
+        for (let racerIndex = 0; racerIndex < 3; racerIndex++) {
+          const racer = buildWorkerDataSource(dbPath);
+          await racer.initialize();
+          racerDataSources.push(racer);
+        }
 
-      const sorted = [...results].sort();
-      expect(sorted).toEqual([false, false, true]);
-      expect(runCount).toBe(1);
+        const results = await Promise.all(
+          racerDataSources.map((racer) => tickOnce(racer.getRepository(Task))),
+        );
+
+        const sorted = [...results].sort();
+        expect(sorted).toEqual([false, false, true]);
+        expect(runCount).toBe(1);
+      } finally {
+        for (const racer of racerDataSources) {
+          if (racer.isInitialized) await racer.destroy();
+        }
+        if (bootstrapDataSource.isInitialized) await bootstrapDataSource.destroy();
+        if (fs.existsSync(dbDirectory)) {
+          fs.rmSync(dbDirectory, { recursive: true, force: true });
+        }
+      }
     });
   });
 });

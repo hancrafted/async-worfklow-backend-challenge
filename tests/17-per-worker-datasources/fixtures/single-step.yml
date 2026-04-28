@@ -1,0 +1,7 @@
+# Issue #17 Wave 2 — single-step DAG used by the overlap test.
+# Each workflow is independent (no cross-workflow deps), so N=3 workflows
+# can drain in parallel under N=3 workers without per-workflow serialisation.
+name: "issue_17_overlap_single_step"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1

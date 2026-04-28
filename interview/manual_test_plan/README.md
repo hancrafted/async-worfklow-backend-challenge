@@ -26,6 +26,7 @@ to the index below — do **not** append sections to this README.
 | §Task 3c-iii Wave 3 — In-process worker pool + complex example workflow (US17, US18, US20) | [`03c-iii_worker-pool-and-complex-example.md`](./03c-iii_worker-pool-and-complex-example.md) |
 | §Task 7 — Default `WORKER_POOL_SIZE=1` + SQLite concurrency ceiling | [`07_worker-pool-default-1-and-sqlite-ceiling.md`](./07_worker-pool-default-1-and-sqlite-ceiling.md) |
 | Issue #17 Wave 1 — Production fix: per-worker DataSources + WAL | [`17a_per-worker-datasources-production.md`](./17a_per-worker-datasources-production.md) |
+| Issue #17 Wave 2 — Test substrate de-mutex + overlap proof | [`17b_test-substrate-de-mutex.md`](./17b_test-substrate-de-mutex.md) |
 
 ## Naming convention
 
