@@ -2,9 +2,28 @@
 
 > **Status:** Planning artifact for the rebuild of `interview/` and the new
 > `interview.md` at repo root. Synthesized from a 9-round grill on
-> 2026-04-28. Locked decisions live in `## Implementation Decisions` below.
+> 2026-04-28; rebased after `main` advanced through Issues #17 and #22 the
+> same day. Locked decisions live in `## Implementation Decisions` below.
 > Once the work is done, this PRD is *historical* — `interview.md` is the
 > reviewer-facing entry point.
+
+## Rebase notes (post-grill)
+
+`main` moved forward after the grill closed; this PRD reflects the merged
+state. Two changes shift the design narrative:
+
+- **Issue #17 — per-worker DataSources + WAL.** `DEFAULT_WORKER_POOL_SIZE`
+  is back to **3** (was pinned at 1 against a shared SQLite connection).
+  The "we shipped default=1" interview talking point is now a *journey*:
+  ship pragmatic ceiling → identify substrate fix → restore production
+  default. Iterative hardening, in the file. Archived note for #17 lives at
+  `interview/manual_test_plan/17a_per-worker-datasources-production.md` and
+  is referenced from the design digest.
+- **Issue #22 — strict `400 WORKFLOW_FAILED` on `/results`.** The lenient
+  policy (return `200` for any terminal workflow) was replaced by a strict
+  reading of README §6. `failed` now returns `400 { error:
+  "WORKFLOW_FAILED" }`; `completed` keeps `200`. Failure detail still
+  surfaces via `/status`. The §06 sad-path script asserts the new shape.
 
 ## Problem Statement
 
@@ -79,11 +98,12 @@ Four sections, in this order, ~240 lines target (no hard cap on the first draft)
 - **`interview/manual_test_plan/00_reset.sh`** — optional. Kills any process on `:3000`, restarts via `npm start &`, waits for `Server is running`. Used when the reviewer wants a clean DB before a final pass.
 - **Per-task scripts (12 total)** — `01_polygon-area.happy.sh`, `01_polygon-area.sad.sh`, `02_report-generation.happy.sh`, `02_report-generation.sad.sh`, `03a_workflow-yaml-dependson.happy.sh`, `03a_workflow-yaml-dependson.sad.sh`, `04_workflow-final-result.happy.sh`, `04_workflow-final-result.sad.sh`, `05_workflow-status.happy.sh`, `05_workflow-status.sad.sh`, `06_workflow-results.happy.sh`, `06_workflow-results.sad.sh`. Each one: source `_lib.sh`, `require_server`, run the test, print `[PASS]`/`[FAIL]` per assertion AND the evidence the assertion is checking, end with `summarize`. Exit code reflects assertion outcome.
 - **Sad-path scripts that mutate DB** clean up after themselves via `trap EXIT` (e.g. the `02_report-generation.sad.sh` corrupted-`Result.data` case reverts the surgical `UPDATE`).
+- **`06_workflow-results.sad.sh`** asserts the post-#22 contract: a workflow whose first step fails terminates as `failed`, and `GET /workflow/:id/results` returns **`400 { error: "WORKFLOW_FAILED" }`** (not `200`). The happy script asserts `200 { workflowId, status: "completed", finalResult }`.
 - **Per-task rationale `.md`** — six files (one per README requirement). Each explains: *what does this script prove*, *what would change if it broke*, *what to look for in the output*. No curl/sqlite snippets — those live in the script. ~25-40 lines each.
 
 ### Workflow narrative content (locked Q6)
 
-- **Mermaid 1 (planning timeline, ~12 nodes)** — left-to-right: `Readme.md` → `to-prd skill (intensive grilling)` → `PRD.md` → `to-issues skill` → `GitHub issues #1..#15` → `CLAUDE.md + Husky hooks` → `TDD per ticket (HITL)` → `iterative hardening (Task 7, follow-ups)` → `manual test plan + scripts`. Edges labeled with the artifact produced.
+- **Mermaid 1 (planning timeline, ~12 nodes)** — left-to-right: `Readme.md` → `to-prd skill (intensive grilling)` → `PRD.md` → `to-issues skill` → `GitHub issues #1..#22` → `CLAUDE.md + Husky hooks` → `TDD per ticket (HITL)` → `iterative hardening (Task 7 → Issue #17 substrate fix; #22 strict /results)` → `manual test plan + scripts`. Edges labeled with the artifact produced.
 - **Mermaid 2 (execution feedback-loop, ~10 nodes)** — node graph with cycles: `code edit` → `pre-commit (lint + tsc + vitest related)` ↻ on fail → `commit` → `pre-push (full npm test + lint)` ↻ on fail → `push` → `manual test plan run` ↻ on fail → `PR review (HITL)` ↻ on change-request → `merge`. Annotated: `--no-verify` forbidden; HITL checkpoints marked.
 
 ### Design digest content (locked Q7)
@@ -91,13 +111,14 @@ Four sections, in this order, ~240 lines target (no hard cap on the first draft)
 The 5–8 narrative entries (final count picked during writing) draw from this candidate pool, ranked by interviewer-grill probability:
 
 1. No lease / heartbeat (the four-layer rebuttal, defended in `interview/archive/no-lease-and-heartbeat.md`)
-2. `WORKER_POOL_SIZE=1` default (SQLite shared-connection ceiling, defended in `design_decisions.md` §Task 7)
+2. **Worker pool default journey: shipped 1 → fixed substrate via Issue #17 → restored 3.** Per-worker `DataSource` instances + WAL mode replaced the shared-connection ceiling (defended in `interview/archive/design_decisions.md` §Task 7 + §Issue #17, plus `interview/manual_test_plan/17a_per-worker-datasources-production.md`). The talking point is *iterative hardening*, not the pin itself.
 3. Output stored on `Result`, not `Task` (defended in `interview/archive/no-task-output-column.md`)
 4. Coroutines on shared event loop ≠ threads (defended in `interview/archive/coroutine-vs-thread.md`)
-5. Fail-fast (CI-pipeline) vs continue-on-error
+5. Fail-fast (CI-pipeline) vs continue-on-error — sweep on `Failed`, promotion on `Completed`, in-progress siblings run to completion (no cancellation interface)
 6. Single-pass transactional workflow creation (UUID v4 minted app-side; no two-pass save)
 7. Eager `finalResult` write inside post-task transaction + lazy patch on `/results` read
 8. `stepNumber` is the public identifier; internal UUIDs never leak
+9. **Strict `400 WORKFLOW_FAILED` on `/results` (Issue #22).** Originally lenient (`200` for any terminal); reverted to README-literal after weighing caller branching vs. HTTP-status purity. Failure detail surfaces on `/status` instead.
 
 The objection table (~10 rows) maps interviewer pushback phrasings to the file containing the prepared defense.
 
@@ -116,7 +137,7 @@ test. "Tests" for this work are:
 - **Editing `tests/`** — same rationale; the test suite is canonical.
 - **Editing `Readme.md` or `PRD.md`** — both are referenced from `interview.md` as backing context but not modified.
 - **Migrating per-objection notes from `interview/archive/` back to `interview/`** — they stay archived; `interview.md`'s objection table links to them in place.
-- **Writing scripts for tasks outside README §1–§6** — Task 0 (test harness), Task 7 (worker-pool default), wave splits (`03b-ii-*`, `03c-*`), and preludes (`pre-7*`) keep their archived `.md` files but get no new shell scripts. They're referenced from the design digest where relevant (Task 7 → `WORKER_POOL_SIZE=1` discussion) but not from the verification table.
+- **Writing scripts for tasks outside README §1–§6** — Task 0 (test harness), Task 7 (worker-pool default journey), wave splits (`03b-ii-*`, `03c-*`), preludes (`pre-7*`), and Issue #17 sub-waves (`17a/17b/17c`) keep their archived `.md` files but get no new shell scripts. They're referenced from the design digest where relevant (Task 7 + Issue #17 → "default pool size journey" entry) but not from the verification table.
 - **CI / GitHub Actions wiring** — local hooks and manual test plan scripts are the gate; CI is already documented as out-of-scope in `design_decisions.md` Task 0.
 - **Removing files from `interview/archive/`** — preserve everything for audit; the marker `CLAUDE.md` is the only mutation.
 - **Diagrams beyond the two mermaids** — no swimlanes, no sequence diagrams, no architecture diagrams in `interview.md`. Anything more lives in linked files.
