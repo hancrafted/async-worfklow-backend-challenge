@@ -55,15 +55,15 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
     });
 
     describe("runner-level persistence", () => {
-      let ds: DataSource;
+      let dataSource: DataSource;
 
       beforeEach(async () => {
-        ds = buildDataSource();
-        await ds.initialize();
+        dataSource = buildDataSource();
+        await dataSource.initialize();
       });
 
       afterEach(async () => {
-        if (ds.isInitialized) await ds.destroy();
+        if (dataSource.isInitialized) await dataSource.destroy();
       });
 
       it("when the job throws, persists Result with data=null and a structured error, and links the task to that Result", async () => {
@@ -72,18 +72,18 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
         // marked Failed with a resultId, and the linked Result has data=null
         // and a JSON-stringified { message, reason: 'job_error', stack } whose
         // stack is capped at 10 lines.
-        const workflowRepo = ds.getRepository(Workflow);
-        const taskRepo = ds.getRepository(Task);
-        const resultRepo = ds.getRepository(Result);
+        const workflowRepository = dataSource.getRepository(Workflow);
+        const taskRepository = dataSource.getRepository(Task);
+        const resultRepository = dataSource.getRepository(Result);
 
-        const wf = await workflowRepo.save(
+        const workflow = await workflowRepository.save(
           Object.assign(new Workflow(), {
             clientId: "c1",
             status: WorkflowStatus.Initial,
           }),
         );
 
-        const task = await taskRepo.save(
+        const task = await taskRepository.save(
           Object.assign(new Task(), {
             clientId: "c1",
             // malformed JSON — PolygonAreaJob will throw at JSON.parse
@@ -91,20 +91,20 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
             status: TaskStatus.Queued,
             taskType: "polygonArea",
             stepNumber: 1,
-            workflow: wf,
+            workflow: workflow,
           }),
         );
 
-        const runner = new TaskRunner(taskRepo);
+        const runner = new TaskRunner(taskRepository);
         await expect(runner.run(task)).rejects.toThrow();
 
-        const refreshed = await taskRepo.findOneOrFail({
+        const refreshed = await taskRepository.findOneOrFail({
           where: { taskId: task.taskId },
         });
         expect(refreshed.status).toBe(TaskStatus.Failed);
         expect(refreshed.resultId).toBeTruthy();
 
-        const stored = await resultRepo.findOneOrFail({
+        const stored = await resultRepository.findOneOrFail({
           where: { resultId: refreshed.resultId },
         });
         expect(stored.data).toBeNull();
@@ -124,15 +124,15 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
   });
 
   describe("worker keeps running after a failed task (US2, US20)", () => {
-    let ds: DataSource;
+    let dataSource: DataSource;
 
     beforeEach(async () => {
-      ds = buildDataSource();
-      await ds.initialize();
+      dataSource = buildDataSource();
+      await dataSource.initialize();
     });
 
     afterEach(async () => {
-      if (ds.isInitialized) await ds.destroy();
+      if (dataSource.isInitialized) await dataSource.destroy();
     });
 
     /**
@@ -142,10 +142,10 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
      * so worker isolation can be asserted on the visible side effects.
      */
     async function drainWorker(): Promise<void> {
-      const taskRepo = ds.getRepository(Task);
-      const runner = new TaskRunner(taskRepo);
+      const taskRepository = dataSource.getRepository(Task);
+      const runner = new TaskRunner(taskRepository);
       for (let i = 0; i < 100; i += 1) {
-        const next = await taskRepo.findOne({
+        const next = await taskRepository.findOne({
           where: { status: TaskStatus.Queued },
           relations: ["workflow"],
           order: { stepNumber: "ASC" },
@@ -167,53 +167,53 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
       // geoJson to malformed input, drains the worker, then asserts: task[0]
       // is Failed with a structured error AND task[1] is still Completed with
       // valid Result.data — the worker-isolation contract (US2, US20).
-      const factory = new WorkflowFactory(ds);
-      const wf = await factory.createWorkflowFromYAML(
+      const factory = new WorkflowFactory(dataSource);
+      const workflow = await factory.createWorkflowFromYAML(
         FIXTURE,
         "client-mixed",
         VALID_POLYGON,
       );
 
-      const taskRepo = ds.getRepository(Task);
-      const tasks = await taskRepo.find({
-        where: { workflow: { workflowId: wf.workflowId } },
+      const taskRepository = dataSource.getRepository(Task);
+      const tasks = await taskRepository.find({
+        where: { workflow: { workflowId: workflow.workflowId } },
         order: { stepNumber: "ASC" },
       });
       tasks[0].geoJson = "not-json{";
-      await taskRepo.save(tasks[0]);
+      await taskRepository.save(tasks[0]);
 
       await drainWorker();
 
-      const refreshed = await taskRepo.find({
-        where: { workflow: { workflowId: wf.workflowId } },
+      const refreshed = await taskRepository.find({
+        where: { workflow: { workflowId: workflow.workflowId } },
         order: { stepNumber: "ASC" },
       });
       expect(refreshed[0].status).toBe(TaskStatus.Failed);
       expect(refreshed[1].status).toBe(TaskStatus.Completed);
 
-      const resultRepo = ds.getRepository(Result);
-      const failResult = await resultRepo.findOneOrFail({
+      const resultRepository = dataSource.getRepository(Result);
+      const failedResult = await resultRepository.findOneOrFail({
         where: { resultId: refreshed[0].resultId },
       });
-      expect(failResult.data).toBeNull();
-      expect(failResult.error).toBeTruthy();
-      const parsedErr = JSON.parse(failResult.error!) as {
+      expect(failedResult.data).toBeNull();
+      expect(failedResult.error).toBeTruthy();
+      const parsedError = JSON.parse(failedResult.error!) as {
         message: string;
         reason: string;
         stack: string;
       };
-      expect(parsedErr.reason).toBe("job_error");
-      expect(parsedErr.message).toMatch(/Invalid GeoJSON|parse/i);
-      expect(parsedErr.stack.split("\n").length).toBeLessThanOrEqual(10);
+      expect(parsedError.reason).toBe("job_error");
+      expect(parsedError.message).toMatch(/Invalid GeoJSON|parse/i);
+      expect(parsedError.stack.split("\n").length).toBeLessThanOrEqual(10);
 
-      const goodResult = await resultRepo.findOneOrFail({
+      const successResult = await resultRepository.findOneOrFail({
         where: { resultId: refreshed[1].resultId },
       });
-      expect(goodResult.error).toBeNull();
-      const parsedGood = JSON.parse(goodResult.data!) as {
+      expect(successResult.error).toBeNull();
+      const parsedSuccess = JSON.parse(successResult.data!) as {
         areaSqMeters: number;
       };
-      expect(parsedGood.areaSqMeters).toBeGreaterThan(0);
+      expect(parsedSuccess.areaSqMeters).toBeGreaterThan(0);
     });
   });
 });

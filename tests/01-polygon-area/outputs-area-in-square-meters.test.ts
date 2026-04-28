@@ -39,11 +39,11 @@ const buildDataSource = (): DataSource =>
  * for tests. Drives `TaskRunner.run` over every queued task in step-number
  * order until the queue is empty.
  */
-async function drainWorker(ds: DataSource): Promise<void> {
-  const taskRepo = ds.getRepository(Task);
-  const runner = new TaskRunner(taskRepo);
+async function drainWorker(dataSource: DataSource): Promise<void> {
+  const taskRepository = dataSource.getRepository(Task);
+  const runner = new TaskRunner(taskRepository);
   for (let i = 0; i < 100; i += 1) {
-    const next = await taskRepo.findOne({
+    const next = await taskRepository.findOne({
       where: { status: TaskStatus.Queued },
       relations: ["workflow"],
       order: { stepNumber: "ASC" },
@@ -97,45 +97,45 @@ describe("Readme §1 R1 — output includes the calculated area in square meters
     });
 
     describe("integration: workflow drained end-to-end", () => {
-      let ds: DataSource;
+      let dataSource: DataSource;
 
       beforeEach(async () => {
-        ds = buildDataSource();
-        await ds.initialize();
+        dataSource = buildDataSource();
+        await dataSource.initialize();
       });
 
       afterEach(async () => {
-        if (ds.isInitialized) await ds.destroy();
+        if (dataSource.isInitialized) await dataSource.destroy();
       });
 
       it("Result.data carries { areaSqMeters: <positive number> } for each completed task", async () => {
         // Loads the polygonArea_only fixture (two queued tasks), drains the
         // worker, and asserts the area-output contract on every Result.
-        const factory = new WorkflowFactory(ds);
-        const wf = await factory.createWorkflowFromYAML(
+        const factory = new WorkflowFactory(dataSource);
+        const workflow = await factory.createWorkflowFromYAML(
           FIXTURE,
           "client-happy",
           VALID_POLYGON,
         );
 
-        await drainWorker(ds);
+        await drainWorker(dataSource);
 
-        const taskRepo = ds.getRepository(Task);
-        const resultRepo = ds.getRepository(Result);
-        const tasks = await taskRepo.find({
-          where: { workflow: { workflowId: wf.workflowId } },
+        const taskRepository = dataSource.getRepository(Task);
+        const resultRepository = dataSource.getRepository(Result);
+        const tasks = await taskRepository.find({
+          where: { workflow: { workflowId: workflow.workflowId } },
           relations: ["workflow"],
           order: { stepNumber: "ASC" },
         });
         expect(tasks).toHaveLength(2);
-        for (const t of tasks) {
-          expect(t.status).toBe(TaskStatus.Completed);
-          expect(t.resultId).toBeTruthy();
-          const r = await resultRepo.findOneOrFail({
-            where: { resultId: t.resultId },
+        for (const task of tasks) {
+          expect(task.status).toBe(TaskStatus.Completed);
+          expect(task.resultId).toBeTruthy();
+          const result = await resultRepository.findOneOrFail({
+            where: { resultId: task.resultId },
           });
-          expect(r.error).toBeNull();
-          const parsed = JSON.parse(r.data!) as { areaSqMeters: number };
+          expect(result.error).toBeNull();
+          const parsed = JSON.parse(result.data!) as { areaSqMeters: number };
           expect(parsed.areaSqMeters).toBeGreaterThan(0);
         }
       });
