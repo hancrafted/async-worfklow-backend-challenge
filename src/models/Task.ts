@@ -28,6 +28,9 @@ export class Task {
     @Column({ default: 1 })
     stepNumber!: number;
 
+    @Column({ type: 'simple-json', default: '[]' })
+    dependsOn!: string[];
+
     @ManyToOne(() => Workflow, workflow => workflow.tasks)
     workflow!: Workflow;
 }

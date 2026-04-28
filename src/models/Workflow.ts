@@ -1,6 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { Task } from './Task';
-import {WorkflowStatus} from "../workflows/WorkflowFactory";
+
+export enum WorkflowStatus {
+    Initial = 'initial',
+    InProgress = 'in_progress',
+    Completed = 'completed',
+    Failed = 'failed'
+}
 
 @Entity({ name: 'workflows' })
 export class Workflow {
