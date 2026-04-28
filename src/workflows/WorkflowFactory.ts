@@ -8,9 +8,19 @@ import { TaskStatus } from '../workers/taskRunner';
 import { ApiErrorCode } from '../utils/errorResponse';
 import {
     validateWorkflowSteps,
+    type NormalisedStep,
+    type ValidationFinding,
 } from './dependencyValidator';
 
 export { WorkflowStatus };
+
+type ParseOutcome =
+    | { parsed: unknown; finding: null }
+    | { parsed: null; finding: ValidationFinding };
+
+type NormalisedOutcome =
+    | { steps: NormalisedStep[]; finding: null }
+    | { steps: null; finding: ValidationFinding };
 
 /**
  * Thrown by `WorkflowFactory.createWorkflowFromYAML` when the YAML payload
@@ -36,77 +46,104 @@ export class WorkflowFactory {
      * persists the workflow + all tasks atomically inside a single
      * `dataSource.transaction(...)`. Either the caller gets a fully-formed
      * workflow back (success) or a `WorkflowValidationError` (no DB writes).
+     *
+     * Body is intentionally an orchestrator: each phase is a named helper so
+     * the sequence (parse → validate → mint ids → build entities → persist)
+     * reads top-to-bottom.
      */
     async createWorkflowFromYAML(
         filePath: string,
         clientId: string,
         geoJson: string,
     ): Promise<Workflow> {
-        // declare
+        const parsing = this.parseYamlFile(filePath);
+        if (parsing.finding) throw new WorkflowValidationError(parsing.finding.code, parsing.finding.message);
+        const validation = this.validateAndNormalize(parsing.parsed);
+        if (validation.finding) throw new WorkflowValidationError(validation.finding.code, validation.finding.message);
+        const stepIdByNumber = this.mintTaskIds(validation.steps);
+        const workflow = this.buildWorkflow(clientId);
+        const tasks = this.buildTasks(validation.steps, stepIdByNumber, workflow, { clientId, geoJson });
+        await this.persistAtomically(workflow, tasks);
+        return workflow;
+    }
+
+    /**
+     * Reads the YAML file from disk and parses it. Returns `{ parsed }` on
+     * success or `{ finding }` on parse failure — never throws (the
+     * orchestrator is the only thrower per CLAUDE.md §Functions).
+     */
+    private parseYamlFile(filePath: string): ParseOutcome {
         const fileContent = fs.readFileSync(filePath, 'utf8');
-        let parsed: unknown;
         try {
-            parsed = yaml.load(fileContent);
+            return { parsed: yaml.load(fileContent), finding: null };
         } catch (error) {
-            throw new WorkflowValidationError(
-                ApiErrorCode.INVALID_WORKFLOW_FILE,
-                `Workflow YAML failed to parse: ${(error as Error).message}`,
-            );
+            return {
+                parsed: null,
+                finding: {
+                    code: ApiErrorCode.INVALID_WORKFLOW_FILE,
+                    message: `Workflow YAML failed to parse: ${(error as Error).message}`,
+                },
+            };
         }
+    }
 
-        // validate
-        const validationError = this.validate(parsed);
-        if (validationError) {
-            throw new WorkflowValidationError(
-                validationError.code,
-                validationError.message,
-            );
+    /**
+     * Pure in-memory validation — no DB. Checks the top-level shape, then
+     * delegates the per-step rules to `validateWorkflowSteps`. Returns the
+     * normalised steps on success or the first finding encountered.
+     */
+    private validateAndNormalize(parsed: unknown): NormalisedOutcome {
+        if (parsed === null || typeof parsed !== 'object' || !('steps' in parsed)) {
+            return {
+                steps: null,
+                finding: {
+                    code: ApiErrorCode.INVALID_WORKFLOW_FILE,
+                    message: 'Workflow YAML must define a top-level `steps` array',
+                },
+            };
         }
+        return validateWorkflowSteps(parsed.steps);
+    }
 
-        // perform main logic — at this point validate() has narrowed to steps
-        const steps = (parsed as { steps: unknown }).steps;
-        const validation = validateWorkflowSteps(steps);
-        if (!validation.steps) {
-            throw new WorkflowValidationError(
-                validation.finding.code,
-                validation.finding.message,
-            );
+    /** Mints a fresh task UUID for every step, keyed by `stepNumber`. */
+    private mintTaskIds(steps: NormalisedStep[]): Map<number, string> {
+        const stepIdByNumber = new Map<number, string>();
+        for (const step of steps) {
+            stepIdByNumber.set(step.stepNumber, uuid());
         }
-        const normalisedSteps = validation.steps;
+        return stepIdByNumber;
+    }
 
-        const stepNumberToTaskId = new Map<number, string>();
-        for (const step of normalisedSteps) {
-            stepNumberToTaskId.set(step.stepNumber, uuid());
-        }
-
-        const workflowId = uuid();
+    /** Builds the unsaved `Workflow` aggregate root in the `Initial` state. */
+    private buildWorkflow(clientId: string): Workflow {
         const workflow = new Workflow();
-        workflow.workflowId = workflowId;
+        workflow.workflowId = uuid();
         workflow.clientId = clientId;
         workflow.status = WorkflowStatus.Initial;
+        return workflow;
+    }
 
-        const tasks: Task[] = normalisedSteps.map((step) => {
+    /**
+     * Builds the unsaved `Task` entities, resolving `dependsOn` step numbers
+     * to the freshly-minted task IDs. A task with no dependencies starts
+     * `Queued`; otherwise it starts `Waiting` and the worker promotes it.
+     */
+    private buildTasks(
+        steps: NormalisedStep[],
+        stepIdByNumber: Map<number, string>,
+        workflow: Workflow,
+        context: { clientId: string; geoJson: string },
+    ): Task[] {
+        return steps.map((step) => {
             const task = new Task();
-            const resolvedTaskId = stepNumberToTaskId.get(step.stepNumber);
-            if (!resolvedTaskId) {
-                throw new Error(
-                    `internal: stepNumber ${step.stepNumber} missing from id map`,
-                );
-            }
-            task.taskId = resolvedTaskId;
-            task.clientId = clientId;
-            task.geoJson = geoJson;
+            task.taskId = this.requireTaskId(stepIdByNumber, step.stepNumber);
+            task.clientId = context.clientId;
+            task.geoJson = context.geoJson;
             task.taskType = step.taskType;
             task.stepNumber = step.stepNumber;
-            task.dependsOn = step.dependsOn.map((dep) => {
-                const resolved = stepNumberToTaskId.get(dep);
-                if (!resolved) {
-                    throw new Error(
-                        `internal: stepNumber ${dep} missing from id map`,
-                    );
-                }
-                return resolved;
-            });
+            task.dependsOn = step.dependsOn.map((dep) =>
+                this.requireTaskId(stepIdByNumber, dep),
+            );
             task.status =
                 task.dependsOn.length === 0
                     ? TaskStatus.Queued
@@ -114,35 +151,34 @@ export class WorkflowFactory {
             task.workflow = workflow;
             return task;
         });
+    }
 
-        // side effects — single atomic transaction (PRD decision 9).
+    /**
+     * Defensive lookup — `validateWorkflowSteps` already guarantees every
+     * `dependsOn` reference resolves, so a miss here is an invariant
+     * violation, not a user-facing validation error.
+     */
+    private requireTaskId(
+        stepIdByNumber: Map<number, string>,
+        stepNumber: number,
+    ): string {
+        const taskId = stepIdByNumber.get(stepNumber);
+        if (!taskId) {
+            throw new Error(
+                `internal: stepNumber ${stepNumber} missing from id map`,
+            );
+        }
+        return taskId;
+    }
+
+    /** Single atomic transaction (PRD decision 9): all-or-nothing persist. */
+    private async persistAtomically(
+        workflow: Workflow,
+        tasks: Task[],
+    ): Promise<void> {
         await this.dataSource.transaction(async (manager) => {
             await manager.getRepository(Workflow).save(workflow);
             await manager.getRepository(Task).save(tasks);
         });
-
-        return workflow;
-    }
-
-    /**
-     * Pure in-memory validation — no DB. Returns null on success or a
-     * `{ code, message }` finding for the first rule violated. Wraps
-     * `validateWorkflowSteps` so the public surface stays simple.
-     */
-    private validate(
-        parsed: unknown,
-    ): { code: ApiErrorCode; message: string } | null {
-        if (
-            parsed === null ||
-            typeof parsed !== 'object' ||
-            !('steps' in parsed)
-        ) {
-            return {
-                code: ApiErrorCode.INVALID_WORKFLOW_FILE,
-                message: 'Workflow YAML must define a top-level `steps` array',
-            };
-        }
-        const result = validateWorkflowSteps(parsed.steps);
-        return result.finding;
     }
 }
