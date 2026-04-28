@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import express from "express";
 import analysisRoutes from "./routes/analysisRoutes";
+import workflowRoutes from "./routes/workflowRoutes";
 import defaultRoute from "./routes/defaultRoute";
 import {
   startWorkerPool,
@@ -16,6 +17,7 @@ const POLL_INTERVAL_MS = 5000;
 const app = express();
 app.use(express.json());
 app.use("/analysis", analysisRoutes);
+app.use("/workflow", workflowRoutes);
 app.use("/", defaultRoute);
 
 AppDataSource.initialize()

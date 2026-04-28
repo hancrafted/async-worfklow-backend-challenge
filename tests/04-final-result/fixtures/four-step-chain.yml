@@ -1,0 +1,13 @@
+name: "task_4_four_step_chain_fixture"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]
+  - taskType: "notification"
+    stepNumber: 3
+    dependsOn: [2]
+  - taskType: "reportGeneration"
+    stepNumber: 4
+    dependsOn: [3]

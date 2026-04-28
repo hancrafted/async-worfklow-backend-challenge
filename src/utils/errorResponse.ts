@@ -2,14 +2,15 @@ import type { Response } from "express";
 
 /**
  * Unified API error code catalogue. Per the CLAUDE.md style guide, callers
- * must use this enum rather than magic strings. Tasks 5/6 will extend with
- * `WORKFLOW_NOT_FOUND` / `WORKFLOW_NOT_TERMINAL` per PRD decision 13.
+ * must use this enum rather than magic strings.
  */
 export enum ApiErrorCode {
   INVALID_PAYLOAD = "INVALID_PAYLOAD",
   INVALID_WORKFLOW_FILE = "INVALID_WORKFLOW_FILE",
   INVALID_DEPENDENCY = "INVALID_DEPENDENCY",
   DEPENDENCY_CYCLE = "DEPENDENCY_CYCLE",
+  WORKFLOW_NOT_FOUND = "WORKFLOW_NOT_FOUND",
+  WORKFLOW_NOT_TERMINAL = "WORKFLOW_NOT_TERMINAL",
 }
 
 /**

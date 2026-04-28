@@ -1,4 +1,4 @@
-import { In, type Repository, type EntityManager } from 'typeorm';
+import { In, IsNull, type Repository, type EntityManager } from 'typeorm';
 import { Task } from '../models/Task';
 import { getJobForTaskType } from '../jobs/JobFactory';
 import { WorkflowStatus } from "../workflows/WorkflowFactory";
@@ -6,6 +6,7 @@ import { Workflow } from "../models/Workflow";
 import { Result } from "../models/Result";
 import type { JobDependencyOutput } from '../jobs/Job';
 import { serializeJobError, type SerializedJobError } from '../utils/serializeJobError';
+import { synthesizeFinalResult } from '../workflows/synthesizeFinalResult';
 import * as logger from '../utils/logger';
 
 export enum TaskStatus {
@@ -226,6 +227,11 @@ export class TaskRunner {
      * Operates on the pre-loaded workflow snapshot from `loadWorkflowWithTasks`
      * — promotion (waiting → queued) does not change terminal-ness, so the
      * snapshot's `allTerminal` / `anyFailed` computation is unaffected.
+     *
+     * On the terminal transition, the framework-synthesized `finalResult`
+     * (PRD §Decision 8) is written together with the new status in a single
+     * conditional UPDATE guarded by `WHERE finalResult IS NULL` — concurrent
+     * terminal-transitioning workers cannot double-write.
      */
     private async evaluateWorkflowLifecycle(
         entityManager: EntityManager,
@@ -240,7 +246,30 @@ export class TaskRunner {
         if (!allTerminal) return;
 
         const anyFailed = workflow.tasks.some((t) => t.status === TaskStatus.Failed);
-        workflow.status = anyFailed ? WorkflowStatus.Failed : WorkflowStatus.Completed;
-        await entityManager.getRepository(Workflow).save(workflow);
+        const newStatus = anyFailed ? WorkflowStatus.Failed : WorkflowStatus.Completed;
+        const finalResult = await this.buildFinalResultForTerminalWorkflow(entityManager, workflow);
+
+        await entityManager.getRepository(Workflow).update(
+            { workflowId: workflow.workflowId, finalResult: IsNull() },
+            { status: newStatus, finalResult: JSON.stringify(finalResult) },
+        );
+    }
+
+    /**
+     * Loads every `Result` row for the workflow's tasks and hands the
+     * collection off to the pure `synthesizeFinalResult(...)` helper. Skipped
+     * tasks have no Result row and are tolerated by the helper.
+     */
+    private async buildFinalResultForTerminalWorkflow(
+        entityManager: EntityManager,
+        workflow: Workflow,
+    ): Promise<ReturnType<typeof synthesizeFinalResult>> {
+        const taskIds = workflow.tasks.map((t) => t.taskId);
+        const results = taskIds.length === 0
+            ? []
+            : await entityManager.getRepository(Result).find({
+                where: { taskId: In(taskIds) },
+            });
+        return synthesizeFinalResult(workflow, workflow.tasks, results);
     }
 }

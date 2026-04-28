@@ -19,6 +19,9 @@ export class Workflow {
     @Column({ type: 'varchar', default: WorkflowStatus.Initial })
     status!: WorkflowStatus;
 
+    @Column({ type: 'text', nullable: true })
+    finalResult!: string | null;
+
     @OneToMany(() => Task, task => task.workflow)
     tasks!: Task[];
 }
