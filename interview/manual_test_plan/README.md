@@ -18,6 +18,7 @@ to the index below — do **not** append sections to this README.
 | §Task 3b-ii Wave 1 — Lifecycle refactor + initial → in_progress claim bump | [`03b-ii-wave-1_lifecycle-refactor-and-claim-bump.md`](./03b-ii-wave-1_lifecycle-refactor-and-claim-bump.md) |
 | §Task 3b-ii Wave 2 — Readiness promotion + dependency envelope | [`03b-ii-wave-2_readiness-promotion-and-dependency-envelope.md`](./03b-ii-wave-2_readiness-promotion-and-dependency-envelope.md) |
 | §Task 3b-ii Wave 3 — Fail-fast sweep + `workflow.failed` | [`03b-ii-wave-3_fail-fast-sweep-and-workflow-failed.md`](./03b-ii-wave-3_fail-fast-sweep-and-workflow-failed.md) |
+| §Task 4 — Workflow `finalResult` synthesis with eager write | [`04_workflow-final-result-synthesis.md`](./04_workflow-final-result-synthesis.md) |
 | §Task 3c-i Wave 1 — JSON-line structured logger (US22) | [`03c-i_json-line-logger.md`](./03c-i_json-line-logger.md) |
 | §Task 3c-ii Wave 2 — Loop-of-last-resort + transient runner errors (US21) | [`03c-ii_loop-of-last-resort.md`](./03c-ii_loop-of-last-resort.md) |
 | §Task 3c-iii Wave 3 — In-process worker pool + complex example workflow (US17, US18, US20) | [`03c-iii_worker-pool-and-complex-example.md`](./03c-iii_worker-pool-and-complex-example.md) |

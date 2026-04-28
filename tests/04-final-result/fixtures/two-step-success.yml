@@ -1,0 +1,7 @@
+name: "task_4_two_step_success_fixture"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]
