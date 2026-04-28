@@ -16,7 +16,7 @@ Whenever the decision is made to optimize for the scope of this coding challenge
 
 - Always use the /tdd skill for the implementor agent.
 - Run `npm test` frequently during the TDD loop and at the very end of every task before declaring it complete. Fix the code on failure — never skip a failing test.
-- After each task is implemented, document in `/interview/manual_test_plan.md` how to manually test the implemented task step by step (one section per task).
+- After each task is implemented, document in `/interview/manual_test_plan/NN_<task>.md` (one file per task) how to manually test the implemented task step by step. Add the new file to the index in `/interview/manual_test_plan/README.md`.
 
 ## Tests
 

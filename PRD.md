@@ -277,7 +277,7 @@ Carried in `CLAUDE.md` (auto-loaded by every delegated subagent) and reproduced 
 
 ### Manual test plan
 
-Per `CLAUDE.md`, after each implementation task the implementor appends a section to `interview/manual_test_plan.md` documenting the curl/HTTP steps to manually verify the task end-to-end.
+Per `CLAUDE.md`, after each implementation task the implementor adds a new file `interview/manual_test_plan/NN_<task>.md` (one file per task) documenting the curl/HTTP steps to manually verify the task end-to-end, and registers it in `interview/manual_test_plan/README.md`.
 
 ## Out of Scope
 
