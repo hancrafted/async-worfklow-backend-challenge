@@ -33,7 +33,7 @@ export class TaskRunner {
 
         try {
             console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
-            const taskResult = await job.run(task);
+            const taskResult = await job.run({ task, dependencies: [] });
             console.log(`Job ${task.taskType} for task ${task.taskId} completed successfully.`);
 
             await this.taskRepository.manager.transaction(async (entityManager) => {

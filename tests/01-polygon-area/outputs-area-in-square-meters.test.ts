@@ -73,7 +73,7 @@ describe("Readme §1 R1 — output includes the calculated area in square meters
       };
       const job = new PolygonAreaJob();
 
-      const result = await job.run(makeTask(JSON.stringify(polygon)));
+      const result = await job.run({ task: makeTask(JSON.stringify(polygon)), dependencies: [] });
 
       // @turf/area returns ~12,363,718,145 m² for this square. Assert a tolerant
       // range rather than an exact float so the test isn't brittle to library
@@ -92,7 +92,7 @@ describe("Readme §1 R1 — output includes the calculated area in square meters
         },
       };
       const job = new PolygonAreaJob();
-      const result = await job.run(makeTask(JSON.stringify(feature)));
+      const result = await job.run({ task: makeTask(JSON.stringify(feature)), dependencies: [] });
       expect(result.areaSqMeters).toBeGreaterThan(1.2e10);
     });
 
@@ -151,7 +151,7 @@ describe("Readme §1 R1 — output includes the calculated area in square meters
         coordinates: [[[0, 0], [1, 0], [2, 0], [0, 0]]],
       };
       const job = new PolygonAreaJob();
-      const result = await job.run(makeTask(JSON.stringify(degenerate)));
+      const result = await job.run({ task: makeTask(JSON.stringify(degenerate)), dependencies: [] });
       expect(result.areaSqMeters).toBe(0);
     });
   });

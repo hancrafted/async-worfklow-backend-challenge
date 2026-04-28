@@ -1,6 +1,6 @@
 import area from "@turf/area";
 import type { Feature, Geometry, Polygon } from "geojson";
-import type { Job } from "./Job";
+import type { Job, JobContext } from "./Job";
 import type { Task } from "../models/Task";
 
 type GenericFeature = Feature<Geometry | null>;
@@ -21,7 +21,8 @@ export enum PolygonAreaJobValidationError {
 }
 
 export class PolygonAreaJob implements Job {
-  async run(task: Task): Promise<PolygonAreaResult> {
+  async run(context: JobContext): Promise<PolygonAreaResult> {
+    const { task } = context;
     const validationError = this.validate(task);
     if (validationError) {
       throw new Error(`Invalid GeoJSON (Polygon expected): ${validationError}`);

@@ -41,17 +41,17 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
   describe("marks the task failed and persists structured Result.error on invalid GeoJSON", () => {
     it("PolygonAreaJob throws a descriptive Error when geoJson is not valid JSON", async () => {
       const job = new PolygonAreaJob();
-      await expect(job.run(makeTask("not-valid-json{"))).rejects.toThrow(
-        /Invalid GeoJSON|parse/i,
-      );
+      await expect(
+        job.run({ task: makeTask("not-valid-json{"), dependencies: [] }),
+      ).rejects.toThrow(/Invalid GeoJSON|parse/i);
     });
 
     it("PolygonAreaJob throws when the GeoJSON is not a Polygon (e.g. Point)", async () => {
       const point = { type: "Point", coordinates: [0, 0] };
       const job = new PolygonAreaJob();
-      await expect(job.run(makeTask(JSON.stringify(point)))).rejects.toThrow(
-        /Polygon/,
-      );
+      await expect(
+        job.run({ task: makeTask(JSON.stringify(point)), dependencies: [] }),
+      ).rejects.toThrow(/Polygon/);
     });
 
     describe("runner-level persistence", () => {
