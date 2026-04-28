@@ -5,14 +5,15 @@
 **Issue:** [#11](https://github.com/hancrafted/async-worfklow-backend-challenge/issues/11)
 
 `GET /workflow/:id/results` returns the framework-synthesized `finalResult`
-for any terminal workflow. Lenient terminal policy (PRD §12): `200` for
-both `completed` and `failed` because `finalResult` carries meaningful
-failure info (`failedAtStep`, per-task `error`). The handler is read-only
-— it never advances workflow lifecycle. If a terminal workflow has
-`finalResult IS NULL` (rare race or a row from before §Task 4 landed), the
-handler synthesizes it on the fly via the same `synthesizeFinalResult(...)`
-helper the runner uses, persists it under `WHERE finalResult IS NULL`, and
-returns the payload.
+for `completed` workflows. Per the literal Readme §Task 6 contract —
+*"Return a 400 response if the workflow is not yet completed."* — `failed`
+workflows return `400 WORKFLOW_FAILED` (failure detail still surfaces via
+`GET /workflow/:id/status` under `failureReason`). The handler is
+read-only — it never advances workflow lifecycle. If a `completed`
+workflow has `finalResult IS NULL` (rare race or a row from before §Task 4
+landed), the handler synthesizes it on the fly via the same
+`synthesizeFinalResult(...)` helper the runner uses, persists it under
+`WHERE finalResult IS NULL`, and returns the payload.
 
 > Replaces the interim SQLite-inspection step from
 > [`04_workflow-final-result-synthesis.md`](./04_workflow-final-result-synthesis.md).
@@ -54,7 +55,7 @@ Confirm:
 - `finalResult` has **no** `failedAtStep` (US15 — omitted on success).
 - The blob contains no `taskId` substring (US16 — UUIDs do not leak).
 
-### 2. Happy path — failed-with-skipped workflow → `200` with `failedAtStep` + per-task error
+### 2. Error path — failed workflow → `400 WORKFLOW_FAILED`
 
 Edit `src/workflows/example_workflow.yml` to a 2-step chain whose first
 step rejects malformed GeoJSON:
@@ -81,18 +82,19 @@ WORKFLOW_ID=$(curl -sS -X POST http://localhost:3000/analysis \
     "geoJson": { "type": "Point", "coordinates": [0, 0] }
   }' | jq -r .workflowId)
 sleep 6
-curl -sS "http://localhost:3000/workflow/$WORKFLOW_ID/results" | jq .
+curl -sS -i "http://localhost:3000/workflow/$WORKFLOW_ID/results"
 ```
 
 Confirm:
 
-- HTTP `200` (lenient terminal policy — `failed` still returns `200`).
-- `status` is `"failed"`.
-- `finalResult.failedAtStep` is `1`.
-- The `stepNumber=1` entry carries `error: { message, reason: "job_error" }`
-  with **no `stack`** (US23).
-- The `stepNumber=2` entry has `status: "skipped"` with neither `output`
-  nor `error`.
+- HTTP `400` (literal Readme §Task 6 — `failed` is not `completed`).
+- Body: `{ "error": "WORKFLOW_FAILED", "message": "Workflow with id '...'
+  failed; results are unavailable. Inspect /workflow/<id>/status for
+  per-task failureReason." }`.
+- A follow-up `GET /workflow/$WORKFLOW_ID/status` reports
+  `status: "failed"`, the `stepNumber=1` entry carries
+  `failureReason: "job_error"`, and the `stepNumber=2` entry is
+  `status: "skipped"`.
 
 ### 3. Error path — non-terminal workflow → `400 WORKFLOW_NOT_TERMINAL`
 

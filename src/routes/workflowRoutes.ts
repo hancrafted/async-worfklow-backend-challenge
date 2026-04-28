@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { In, IsNull, type DataSource, type EntityManager } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import type { Task } from '../models/Task';
@@ -106,47 +106,77 @@ export function createWorkflowRouter(
     });
 
     router.get('/:id/results', async (req, res) => {
-        const workflowId = req.params.id;
-        const workflow = await options.dataSource.getRepository(Workflow).findOne({
-            where: { workflowId },
-            relations: ['tasks'],
-        });
-        if (!workflow) {
-            errorResponse(
-                res,
-                404,
-                ApiErrorCode.WORKFLOW_NOT_FOUND,
-                `Workflow with id '${workflowId}' was not found`,
-            );
-            return;
-        }
-        if (!TERMINAL_WORKFLOW_STATUSES.has(workflow.status)) {
-            errorResponse(
-                res,
-                400,
-                ApiErrorCode.WORKFLOW_NOT_TERMINAL,
-                `Workflow with id '${workflowId}' is not terminal (status: ${workflow.status})`,
-            );
-            return;
-        }
-
-        let finalResult: FinalResultPayload;
-        if (workflow.finalResult !== null) {
-            finalResult = JSON.parse(workflow.finalResult) as FinalResultPayload;
-        } else {
-            finalResult = await options.dataSource.transaction((entityManager) =>
-                applyLazyFinalResultPatch(entityManager, workflow),
-            );
-        }
-
-        res.status(200).json({
-            workflowId: workflow.workflowId,
-            status: workflow.status,
-            finalResult,
-        });
+        await handleGetWorkflowResults(options.dataSource, req.params.id, res);
     });
 
     return router;
+}
+
+/**
+ * `/:id/results` handler body, extracted to keep `createWorkflowRouter`
+ * under the per-function line ceiling. Strict-completion policy (literal
+ * Readme §Task 6 — supersedes the original lenient terminal policy, see
+ * issue #22 / `interview/design_decisions.md` §Task 6 follow-up):
+ *   - 404 WORKFLOW_NOT_FOUND for unknown ids,
+ *   - 400 WORKFLOW_NOT_TERMINAL for `initial` / `in_progress`,
+ *   - 400 WORKFLOW_FAILED for `failed` (failure detail surfaces via
+ *     `GET /workflow/:id/status` under per-task `failureReason`),
+ *   - 200 { workflowId, status, finalResult } for `completed` (with the
+ *     lazy-patch path for terminal rows whose `finalResult IS NULL`).
+ * Read-only on every branch — never advances workflow lifecycle
+ * (PRD §Implementation Decision 13).
+ */
+async function handleGetWorkflowResults(
+    dataSource: DataSource,
+    workflowId: string,
+    res: Response,
+): Promise<void> {
+    const workflow = await dataSource.getRepository(Workflow).findOne({
+        where: { workflowId },
+        relations: ['tasks'],
+    });
+    if (!workflow) {
+        errorResponse(
+            res,
+            404,
+            ApiErrorCode.WORKFLOW_NOT_FOUND,
+            `Workflow with id '${workflowId}' was not found`,
+        );
+        return;
+    }
+    if (!TERMINAL_WORKFLOW_STATUSES.has(workflow.status)) {
+        errorResponse(
+            res,
+            400,
+            ApiErrorCode.WORKFLOW_NOT_TERMINAL,
+            `Workflow with id '${workflowId}' is not terminal (status: ${workflow.status})`,
+        );
+        return;
+    }
+    if (workflow.status === WorkflowStatus.Failed) {
+        errorResponse(
+            res,
+            400,
+            ApiErrorCode.WORKFLOW_FAILED,
+            `Workflow with id '${workflowId}' failed; results are unavailable. Inspect /workflow/${workflowId}/status for per-task failureReason.`,
+        );
+        return;
+    }
+
+    let finalResult: FinalResultPayload;
+    if (workflow.finalResult !== null) {
+        finalResult = JSON.parse(workflow.finalResult) as FinalResultPayload;
+    } else {
+        finalResult = await dataSource.transaction((entityManager) =>
+            applyLazyFinalResultPatch(entityManager, workflow),
+        );
+    }
+
+    res.status(200).json({
+        workflowId: workflow.workflowId,
+        status: workflow.status,
+        finalResult,
+    });
 }
 
 /**

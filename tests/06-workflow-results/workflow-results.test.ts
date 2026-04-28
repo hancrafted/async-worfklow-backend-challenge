@@ -11,7 +11,6 @@ import { TaskStatus } from "../../src/workers/taskRunner";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 import { createWorkflowRouter } from "../../src/routes/workflowRoutes";
 import { ApiErrorCode } from "../../src/utils/errorResponse";
-import { JobErrorReason } from "../../src/utils/serializeJobError";
 import type { Job } from "../../src/jobs/Job";
 import { drainWorker } from "../03-interdependent-tasks/helpers/drainWorker";
 import type * as MockJobsByTypeModule from "../03-interdependent-tasks/helpers/mockJobsByType";
@@ -137,11 +136,17 @@ describe("Task 6 — GET /workflow/:id/results (Readme §6)", () => {
       for (const task of tasks) expect(responseText).not.toContain(task.taskId);
     });
 
-    it("200 on a failed workflow with failedAtStep and per-task error (no stack)", async () => {
-      // 4-step chain where step 1 fails. The runner's sweep flips downstream
-      // siblings to skipped; lifecycle eval closes the workflow as failed and
-      // writes finalResult eagerly. The /results handler returns 200 because
-      // failed is a terminal status (lenient terminal policy, PRD §12).
+  });
+
+  describe("error path: workflow failed", () => {
+    it("returns 400 { error: 'WORKFLOW_FAILED', message } on a failed workflow", async () => {
+      // Drives a 4-step chain where step 1 fails. The runner's sweep skips
+      // downstream tasks and lifecycle eval closes the workflow as failed.
+      // Per the literal Readme §Task 6 contract — "Return a 400 response if
+      // the workflow is not yet completed" — the handler must reject with
+      // WORKFLOW_FAILED rather than serve the lenient 200+finalResult shape
+      // (supersedes PRD §Implementation Decision 12). Failure detail still
+      // surfaces via GET /workflow/:id/status (`failureReason`).
       const failingPolygonArea: Job = { run: () => Promise.reject(new Error("polygon-boom")) };
       const noopJob: Job = { run: () => Promise.resolve({ ok: true }) };
       setMockJobsByType({
@@ -157,25 +162,20 @@ describe("Task 6 — GET /workflow/:id/results (Readme §6)", () => {
       const response = await request(buildApp(dataSource)).get(
         `/workflow/${workflow.workflowId}/results`,
       );
-      const body = response.body as ResultsBody;
 
-      expect(response.status).toBe(200);
-      expect(body.status).toBe(WorkflowStatus.Failed);
-      expect(body.finalResult.failedAtStep).toBe(1);
-      expect(body.finalResult.tasks[0]).toEqual({
-        stepNumber: 1,
-        taskType: "polygonArea",
-        status: TaskStatus.Failed,
-        error: { message: "polygon-boom", reason: JobErrorReason.JobError },
+      expect(response.status).toBe(400);
+      const body = response.body as ErrorBody;
+      expect(body.error).toBe(ApiErrorCode.WORKFLOW_FAILED);
+      expect(body.message).toContain(workflow.workflowId);
+      expect(body.message.toLowerCase()).toContain("failed");
+
+      // Confirm the workflow really did reach the failed terminal state —
+      // otherwise the 400 would be a false positive against an unintended
+      // status.
+      const persisted = await dataSource.getRepository(Workflow).findOneOrFail({
+        where: { workflowId: workflow.workflowId },
       });
-      for (const stepNumber of [2, 3, 4]) {
-        const entry = body.finalResult.tasks.find((t) => t.stepNumber === stepNumber)!;
-        expect(entry.status).toBe(TaskStatus.Skipped);
-        expect(entry).not.toHaveProperty("output");
-        expect(entry).not.toHaveProperty("error");
-      }
-      // US23: stack is stripped from the public payload.
-      expect(JSON.stringify(body)).not.toContain("stack");
+      expect(persisted.status).toBe(WorkflowStatus.Failed);
     });
   });
 
