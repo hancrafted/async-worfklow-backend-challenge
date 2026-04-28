@@ -6,7 +6,7 @@ import { Task } from "../models/Task";
 import { Result } from "../models/Result";
 import { Workflow } from "../models/Workflow";
 import { WorkflowStatus } from "../workflows/WorkflowFactory";
-import type { Job } from "../jobs/Job";
+import type { Job, JobContext } from "../jobs/Job";
 
 // Module under test injects its job via `getJobForTaskType`. We mock that
 // boundary so the runner unit test can install a spy job and assert the
@@ -242,6 +242,329 @@ describe("TaskRunner — workflow lifecycle (PRD §Decision 8 + §9, Wave 1)", (
 // Each seed below stages a workflow whose persisted status would be flipped
 // to the OPPOSITE terminal value if the guard were missing — proving the
 // short-circuit by observing that the persisted status does not change.
+// Wave 2: readiness promotion (waiting → queued) fires inside the post-task
+// transaction, but only on Completed transitions (PRD §Decision 9). The unit
+// tests below seed parent + child tasks directly so the promotion logic is
+// exercised in isolation from WorkflowFactory.
+async function seedParentChildPair(
+  dataSource: DataSource,
+  parentStatus: TaskStatus = TaskStatus.Queued,
+): Promise<{ workflow: Workflow; parent: Task; child: Task }> {
+  const workflowRepository = dataSource.getRepository(Workflow);
+  const taskRepository = dataSource.getRepository(Task);
+  const workflow = await workflowRepository.save(
+    Object.assign(new Workflow(), {
+      clientId: "c1",
+      status: WorkflowStatus.Initial,
+    }),
+  );
+  const parent = await taskRepository.save(
+    Object.assign(new Task(), {
+      clientId: "c1",
+      geoJson: "{}",
+      status: parentStatus,
+      taskType: "polygonArea",
+      stepNumber: 1,
+      dependsOn: [],
+      workflow,
+    }),
+  );
+  const child = await taskRepository.save(
+    Object.assign(new Task(), {
+      clientId: "c1",
+      geoJson: "{}",
+      status: TaskStatus.Waiting,
+      taskType: "analysis",
+      stepNumber: 2,
+      dependsOn: [parent.taskId],
+      workflow,
+    }),
+  );
+  return { workflow, parent, child };
+}
+
+describe("TaskRunner — Wave 2 readiness promotion (waiting → queued)", () => {
+  let dataSource: DataSource;
+
+  beforeEach(async () => {
+    dataSource = buildDataSource();
+    await dataSource.initialize();
+    getJobMock.mockReset();
+  });
+
+  afterEach(async () => {
+    if (dataSource.isInitialized) await dataSource.destroy();
+  });
+
+  describe("happy path — promotion fires only when the parent transition is Completed", () => {
+    it("promotes a waiting child whose sole dependency just completed", async () => {
+      // Seed parent (queued) + child (waiting, depends on parent). Run parent
+      // with a successful job. Expectation: post-transaction the child has
+      // moved waiting → queued because every dep is now Completed.
+      getJobMock.mockReturnValue({ run: () => Promise.resolve({ ok: true }) });
+      const { parent, child } = await seedParentChildPair(dataSource);
+      const runner = new TaskRunner(dataSource.getRepository(Task));
+
+      await runner.run(parent);
+
+      const refreshedChild = await dataSource
+        .getRepository(Task)
+        .findOneOrFail({ where: { taskId: child.taskId } });
+      expect(refreshedChild.status).toBe(TaskStatus.Queued);
+    });
+
+    it("does NOT promote when the parent transition is Failed", async () => {
+      // Promotion is gated on outcome.status === Completed (PRD §Decision 9).
+      // A failing parent must leave the child in waiting — fail-fast sweep is
+      // Wave 3's responsibility, not promotion's.
+      getJobMock.mockReturnValue({
+        run: () => Promise.reject(new Error("boom")),
+      });
+      const { parent, child } = await seedParentChildPair(dataSource);
+      const runner = new TaskRunner(dataSource.getRepository(Task));
+
+      await expect(runner.run(parent)).rejects.toThrow(/boom/);
+
+      const refreshedChild = await dataSource
+        .getRepository(Task)
+        .findOneOrFail({ where: { taskId: child.taskId } });
+      expect(refreshedChild.status).toBe(TaskStatus.Waiting);
+    });
+  });
+
+  describe("error path — partial dependency completion does not promote", () => {
+    it("keeps a multi-dep child waiting until every parent is Completed", async () => {
+      // Seed two parents + one child that depends on BOTH. Run parent A; the
+      // child must stay waiting because parent B is still queued. Then run
+      // parent B; now both deps are Completed and the child promotes.
+      const workflowRepository = dataSource.getRepository(Workflow);
+      const taskRepository = dataSource.getRepository(Task);
+      const workflow = await workflowRepository.save(
+        Object.assign(new Workflow(), {
+          clientId: "c1",
+          status: WorkflowStatus.Initial,
+        }),
+      );
+      const parentA = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Queued,
+          taskType: "polygonArea",
+          stepNumber: 1,
+          dependsOn: [],
+          workflow,
+        }),
+      );
+      const parentB = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Queued,
+          taskType: "polygonArea",
+          stepNumber: 2,
+          dependsOn: [],
+          workflow,
+        }),
+      );
+      const child = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Waiting,
+          taskType: "analysis",
+          stepNumber: 3,
+          dependsOn: [parentA.taskId, parentB.taskId],
+          workflow,
+        }),
+      );
+
+      getJobMock.mockReturnValue({ run: () => Promise.resolve({ ok: true }) });
+      const runner = new TaskRunner(dataSource.getRepository(Task));
+
+      await runner.run(parentA);
+      const afterA = await taskRepository.findOneOrFail({
+        where: { taskId: child.taskId },
+      });
+      expect(afterA.status).toBe(TaskStatus.Waiting);
+
+      await runner.run(parentB);
+      const afterB = await taskRepository.findOneOrFail({
+        where: { taskId: child.taskId },
+      });
+      expect(afterB.status).toBe(TaskStatus.Queued);
+    });
+  });
+});
+
+// Wave 2: dependency envelope builder. The runner replaces the hardcoded
+// `dependencies: []` with `{ stepNumber, taskType, taskId, output }` per
+// upstream Result, sorted by stepNumber ASC, with a guard for missing rows.
+describe("TaskRunner — Wave 2 dependency envelope builder", () => {
+  let dataSource: DataSource;
+
+  beforeEach(async () => {
+    dataSource = buildDataSource();
+    await dataSource.initialize();
+    getJobMock.mockReset();
+  });
+
+  afterEach(async () => {
+    if (dataSource.isInitialized) await dataSource.destroy();
+  });
+
+  describe("happy path — envelope shape + ascending stepNumber sort", () => {
+    it("sorts dependencies by stepNumber ASC and parses output from Result.data", async () => {
+      // Seed two completed parents in REVERSE stepNumber order (parent at
+      // step 2 inserted first, parent at step 1 second). Each parent has a
+      // persisted Result row whose `data` is JSON-stringified. The runner
+      // must return the envelope sorted by stepNumber ASC and parse each
+      // upstream Result.data back into the `output` field.
+      const workflowRepository = dataSource.getRepository(Workflow);
+      const taskRepository = dataSource.getRepository(Task);
+      const resultRepository = dataSource.getRepository(Result);
+      const workflow = await workflowRepository.save(
+        Object.assign(new Workflow(), {
+          clientId: "c1",
+          status: WorkflowStatus.InProgress,
+        }),
+      );
+      const parentTwo = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Completed,
+          taskType: "analysis",
+          stepNumber: 2,
+          dependsOn: [],
+          workflow,
+        }),
+      );
+      const parentOne = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Completed,
+          taskType: "polygonArea",
+          stepNumber: 1,
+          dependsOn: [],
+          workflow,
+        }),
+      );
+      const resultTwo = await resultRepository.save(
+        Object.assign(new Result(), {
+          taskId: parentTwo.taskId,
+          data: JSON.stringify({ analysed: true }),
+        }),
+      );
+      parentTwo.resultId = resultTwo.resultId;
+      await taskRepository.save(parentTwo);
+      const resultOne = await resultRepository.save(
+        Object.assign(new Result(), {
+          taskId: parentOne.taskId,
+          data: JSON.stringify({ areaSqMeters: 42 }),
+        }),
+      );
+      parentOne.resultId = resultOne.resultId;
+      await taskRepository.save(parentOne);
+
+      const child = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Queued,
+          taskType: "notification",
+          stepNumber: 3,
+          dependsOn: [parentTwo.taskId, parentOne.taskId],
+          workflow,
+        }),
+      );
+
+      const captured: JobContext[] = [];
+      const spyJob: Job = {
+        run: (context) => {
+          captured.push(context);
+          return Promise.resolve({ sent: true });
+        },
+      };
+      getJobMock.mockReturnValue(spyJob);
+
+      const runner = new TaskRunner(dataSource.getRepository(Task));
+      await runner.run(child);
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].dependencies).toEqual([
+        {
+          stepNumber: 1,
+          taskType: "polygonArea",
+          taskId: parentOne.taskId,
+          output: { areaSqMeters: 42 },
+        },
+        {
+          stepNumber: 2,
+          taskType: "analysis",
+          taskId: parentTwo.taskId,
+          output: { analysed: true },
+        },
+      ]);
+    });
+  });
+
+  describe("error path — missing upstream Result throws and fails the task", () => {
+    it("throws a descriptive Error when a declared dependency has no Result row", async () => {
+      // Seed parent in Completed state but DELIBERATELY skip its Result row.
+      // This is the defence-in-depth guard: under normal operation promotion
+      // only fires after the parent's Result is persisted, but the runner
+      // must still throw a clear error if invoked on a malformed state.
+      const workflowRepository = dataSource.getRepository(Workflow);
+      const taskRepository = dataSource.getRepository(Task);
+      const workflow = await workflowRepository.save(
+        Object.assign(new Workflow(), {
+          clientId: "c1",
+          status: WorkflowStatus.InProgress,
+        }),
+      );
+      const parent = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Completed,
+          taskType: "polygonArea",
+          stepNumber: 1,
+          dependsOn: [],
+          workflow,
+        }),
+      );
+      const child = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1",
+          geoJson: "{}",
+          status: TaskStatus.Queued,
+          taskType: "analysis",
+          stepNumber: 2,
+          dependsOn: [parent.taskId],
+          workflow,
+        }),
+      );
+
+      // The job spy never runs because the envelope builder throws first;
+      // the runner's normal failure path catches and persists Result.error.
+      getJobMock.mockReturnValue({
+        run: () => Promise.resolve({ ok: true }),
+      });
+      const runner = new TaskRunner(dataSource.getRepository(Task));
+      await expect(runner.run(child)).rejects.toThrow(
+        new RegExp(`${parent.taskId}|stepNumber 1`),
+      );
+
+      const refreshedChild = await dataSource
+        .getRepository(Task)
+        .findOneOrFail({ where: { taskId: child.taskId } });
+      expect(refreshedChild.status).toBe(TaskStatus.Failed);
+    });
+  });
+});
+
 describe("TaskRunner — terminal-workflow short-circuit (defence-in-depth)", () => {
   let dataSource: DataSource;
 
