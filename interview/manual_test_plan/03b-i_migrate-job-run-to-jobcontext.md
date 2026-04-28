@@ -7,8 +7,10 @@
 ## Setup
 
 This task is a pure signature migration — no observable behavior change. The
-shipped `src/workflows/example_workflow.yml` (single `analysis` step, no
-`dependsOn`) is the right fixture for the smoke test; do not edit it.
+shipped `src/workflows/example_workflow.yml` (6-step DAG: a deps-free
+`polygonArea` root + a deps-free `analysis` root, fan-out at step 3 and
+fan-in at step 4 across four `notification` steps) is the right fixture
+for the smoke test; do not edit it.
 
 ```bash
 npm install   # only on a fresh clone

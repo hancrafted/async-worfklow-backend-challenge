@@ -6,7 +6,6 @@ const tseslint = require("typescript-eslint");
 // each is touched by Task 1+ work; new files added to src/** are linted normally.
 // See interview/design_decisions.md §Task 0 — Legacy src/** grandfathering.
 const legacySrcFiles = [
-  "src/index.ts",
   "src/data-source.ts",
   "src/jobs/DataAnalysisJob.ts",
   "src/jobs/EmailNotificationJob.ts",

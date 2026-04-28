@@ -41,8 +41,10 @@ CONSTRAINT "FK_…" FOREIGN KEY ("workflowId") REFERENCES "workflows" ("workflow
 
 ## 2. Live worker still drives a workflow end-to-end
 
-The shipped `src/workflows/example_workflow.yml` (single `analysis` step)
-is the right fixture; do not edit it.
+The shipped `src/workflows/example_workflow.yml` (6-step DAG: a deps-free
+`polygonArea` root + a deps-free `analysis` root, fan-out at step 3 and
+fan-in at step 4 across four `notification` steps) is the right fixture;
+do not edit it.
 
 ```bash
 npm start

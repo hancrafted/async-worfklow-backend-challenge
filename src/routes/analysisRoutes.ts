@@ -8,6 +8,7 @@ import {
     WorkflowValidationError,
 } from '../workflows/WorkflowFactory';
 import { ApiErrorCode, errorResponse } from '../utils/errorResponse';
+import * as logger from '../utils/logger';
 
 interface CreateAnalysisRouterOptions {
     dataSource: DataSource;
@@ -76,7 +77,7 @@ export function createAnalysisRouter(
                 );
                 return;
             }
-            console.error('Error creating workflow:', error);
+            logger.error('failed to create workflow', { error });
             res.status(500).json({ message: 'Failed to create workflow' });
         }
     });

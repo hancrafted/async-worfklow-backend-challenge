@@ -1,0 +1,74 @@
+name: "three_worker_concurrent_workflow"
+steps:
+  # Initial trigger step
+  - taskType: "notification"
+    stepNumber: 1
+
+  # Divergence: 3 independent steps become available immediately after step 1
+  - taskType: "notification"
+    stepNumber: 2
+    dependsOn: [1]
+  - taskType: "notification"
+    stepNumber: 3
+    dependsOn: [1]
+  - taskType: "notification"
+    stepNumber: 4
+    dependsOn: [1]
+
+  # Lane 1 (Continues from 2)
+  - taskType: "notification"
+    stepNumber: 5
+    dependsOn: [2]
+  - taskType: "notification"
+    stepNumber: 8
+    dependsOn: [5]
+  - taskType: "notification"
+    stepNumber: 11
+    dependsOn: [8]
+  - taskType: "notification"
+    stepNumber: 14
+    dependsOn: [11]
+
+  # Lane 2 (Continues from 3)
+  - taskType: "notification"
+    stepNumber: 6
+    dependsOn: [3]
+  - taskType: "notification"
+    stepNumber: 9
+    dependsOn: [6]
+  - taskType: "notification"
+    stepNumber: 12
+    dependsOn: [9]
+  - taskType: "notification"
+    stepNumber: 15
+    dependsOn: [12]
+
+  # Lane 3 (Continues from 4)
+  - taskType: "notification"
+    stepNumber: 7
+    dependsOn: [4]
+  - taskType: "notification"
+    stepNumber: 10
+    dependsOn: [7]
+  - taskType: "notification"
+    stepNumber: 13
+    dependsOn: [10]
+  - taskType: "notification"
+    stepNumber: 16
+    dependsOn: [13]
+
+  # Convergence: Waits for all 3 lanes to complete
+  - taskType: "notification"
+    stepNumber: 17
+    dependsOn: [14, 15, 16]
+
+  # Final sequential steps
+  - taskType: "notification"
+    stepNumber: 18
+    dependsOn: [17]
+  - taskType: "notification"
+    stepNumber: 19
+    dependsOn: [18]
+  - taskType: "notification"
+    stepNumber: 20
+    dependsOn: [19]
