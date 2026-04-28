@@ -77,7 +77,7 @@ The cost is permanent and code-wide; the benefit is "matching a distributed-syst
 
 ## Cost of the omission within a single process lifetime
 
-A genuine hang (unresolved promise inside a job) occupies 1 of N worker slots until the process is restarted. With the default `WORKER_POOL_SIZE=3`, that is a 33% capacity loss for as long as the process runs. The mitigation is the per-job timeout in Layer 4, which is the recommended follow-on if the interviewer pushes on hangs. Even without that, the workflow whose task is hung will visibly stall on `/status` — the operator (or reviewer) sees it and restarts.
+A genuine hang (unresolved promise inside a job) occupies 1 of N worker slots until the process is restarted. At the default `WORKER_POOL_SIZE=1` (see `interview/design_decisions.md` §Task 7 — the SQLite concurrency ceiling pins it there until Issue #17 lands), that is a 100% capacity loss until restart. With the override raised (`WORKER_POOL_SIZE=N`, N>1), the loss falls to `1/N`. Either way the mitigation is the per-job timeout in Layer 4, which is the recommended follow-on if the interviewer pushes on hangs. Even without that, the workflow whose task is hung will visibly stall on `/status` — the operator (or reviewer) sees it and restarts.
 
 ## Cross-references
 

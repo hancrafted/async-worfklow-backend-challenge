@@ -4,9 +4,12 @@
 **PRD:** §10 / US17 (worker pool), US18 (atomic claim race), US20 (per-worker isolation)
 
 This wave wires `startWorkerPool({ size, repository, sleepMs, sleepFn?, stopSignal })`
-into `src/index.ts`, honours `WORKER_POOL_SIZE` (default `3`), and updates
-`src/workflows/example_workflow.yml` to a 6-step DAG that exercises the new
-runtime end-to-end (parallel roots, fan-in, dependency chaining).
+into `src/index.ts`, honours `WORKER_POOL_SIZE` (default `1` — see
+`interview/design_decisions.md` §Task 7 / Issue #17 for the SQLite concurrency
+ceiling that pins it; raise via `WORKER_POOL_SIZE=N` to exercise the
+atomic-claim race), and updates `src/workflows/example_workflow.yml` to a
+6-step DAG that exercises the new runtime end-to-end (parallel roots, fan-in,
+dependency chaining).
 
 ## Pool contract recap
 
@@ -18,8 +21,8 @@ startWorkerPool({ size, repository, sleepMs, sleepFn?, stopSignal })
 ```
 
 `resolveWorkerPoolSize(rawValue)` parses `process.env.WORKER_POOL_SIZE`:
-`undefined` / `""` → default 3; anything else must be a positive integer.
-Boot-time invalid values log + `process.exit(1)`.
+`undefined` / `""` → default `1` (`DEFAULT_WORKER_POOL_SIZE`); anything else
+must be a positive integer. Boot-time invalid values log + `process.exit(1)`.
 
 ## Example workflow DAG
 
@@ -34,18 +37,26 @@ steps:
   6: notification  [deps: 5]
 ```
 
-Steps 1+2 are deps-free roots → both `queued` at insert; with `WORKER_POOL_SIZE=3`
-two workers race for them concurrently. Steps 3+4 promote in parallel after their
-respective polygonArea completes. Step 5 fans in (deps: 3+4). Step 6 chains the
-final notification.
+Steps 1+2 are deps-free roots → both `queued` at insert; with the manual
+override `WORKER_POOL_SIZE=3` two workers race for them concurrently (the
+substrate caveat from §Task 7 / Issue #17 applies — concurrent transactions
+on the shared SQLite connection can trip `SQLITE_ERROR: no such savepoint`,
+the same way the integration tests serialise via `drainPool`'s mutex). Steps
+3+4 promote in parallel after their respective polygonArea completes. Step 5
+fans in (deps: 3+4). Step 6 chains the final notification.
 
 ## Setup
 
 ```bash
 npm install   # only on a fresh clone
+npm start 2>&1 | tee /tmp/server.log
+# → {"level":"info","ts":"…","msg":"starting worker pool (size=1)"}
+# → {"level":"info","ts":"…","msg":"server listening at http://localhost:3000"}
+
+# Optional: raise to exercise the atomic-claim race manually (substrate caveat
+# from §Task 7 applies — see interview/design_decisions.md and Issue #17).
 WORKER_POOL_SIZE=3 npm start 2>&1 | tee /tmp/server.log
 # → {"level":"info","ts":"…","msg":"starting worker pool (size=3)"}
-# → {"level":"info","ts":"…","msg":"server listening at http://localhost:3000"}
 ```
 
 ## 1. Happy path — pool drains the 6-step DAG

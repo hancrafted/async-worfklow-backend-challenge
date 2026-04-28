@@ -204,14 +204,14 @@ A: Returned when a writer can't acquire the write lock within the busy timeout. 
 
 ### This project specifically
 
-**Q: Why does the worker pool default to N=3?**
-A: Pragmatic guess that gives enough concurrency to demonstrate the atomic-claim race and pipeline a few independent tasks, while staying small enough that SQLite write contention isn't a constant problem. Configurable via `WORKER_POOL_SIZE` so reviewers can change it.
+**Q: Why does the worker pool default to N=1?**
+A: The shipped runtime shares one `AppDataSource` (= one SQLite connection) across every worker coroutine. TypeORM's `manager.transaction(...)` cannot interleave `BEGIN`/`SAVEPOINT`/`COMMIT` boundaries on a shared connection — concurrent coroutines trip `SQLITE_ERROR: no such savepoint`. Shipping a higher default would expose that crash surface in production. The default is pinned at 1 until per-worker DataSources land (Issue #17); concurrency remains available manually via `WORKER_POOL_SIZE=N` (with the same substrate caveat the integration tests document via `drainPool`'s mutex). See `interview/design_decisions.md` §Task 7.
 
-**Q: Why not N=1?**
-A: With N=1, all sibling tasks serialize even when their dependencies are satisfied. A workflow with steps `[1] → [2,3,4] → [5]` would run 2, 3, 4 sequentially. With N≥2 they run concurrently. The user-visible benefit is real: shorter wallclock for branching workflows.
+**Q: Then why not just keep N=1 forever?**
+A: With N=1, sibling tasks serialize even when their dependencies are satisfied — a workflow with steps `[1] → [2,3,4] → [5]` would run 2, 3, 4 sequentially. With N≥2 they run concurrently and the user-visible wallclock for branching workflows drops. The worker pool's atomic-claim primitive (conditional `UPDATE` with `affected===1`) already supports N>1 correctly at the *DB-row* level; what blocks raising the default is the *transaction-boundary* limitation of the shared connection. Fixing the substrate (per-worker DataSources, Issue #17) is what unlocks raising the default back to N>1.
 
-**Q: Why not N=10 or N=100?**
-A: SQLite's writer lock caps useful concurrency. Past a few workers, additional ones spend most of their time waiting for the write lock or hitting `SQLITE_BUSY`. Empirically, 3–5 is the sweet spot for this kind of embedded-DB worker setup.
+**Q: Why not N=10 or N=100 once the substrate is fixed?**
+A: SQLite's writer lock still caps useful concurrency even with separate connections. Past a few workers, additional ones spend most of their time waiting for the write lock or hitting `SQLITE_BUSY`. Empirically, 3–5 is the sweet spot for this kind of embedded-DB worker setup; the post-#17 default would land in that range.
 
 **Q: How do you ensure two workers don't run the same task?**
 A: The atomic claim: `UPDATE tasks SET status='in_progress' WHERE taskId=? AND status='queued'`. The DB guarantees this UPDATE is atomic. Whichever worker's UPDATE commits first changes the status; the other's WHERE clause now fails and it moves on. No application-level locks needed.
@@ -268,7 +268,7 @@ A: Three layers: (1) a cancellation token passed into the job, checked at every 
 
 ## 8. One-page cheat sheet for the interview
 
-> "We chose an in-process coroutine pool (N=3 by default) over `worker_threads` because the workload is **I/O-bound** — every job spends its time in DB roundtrips, not CPU. SQLite serializes writes globally, so adding OS threads wouldn't increase throughput; it would just create lock contention and `SQLITE_BUSY` retries. TypeORM's `DataSource` isn't shareable across thread isolates either, so each thread would need its own connection pool fighting the same write lock. The atomic claim is implemented at the DB layer with a conditional `UPDATE` — that race is real concurrency, resolved deterministically by the database. If a future job became CPU-heavy (image transforms, heavy parsing), I'd offload only that step to `worker_threads` via Piscina, keeping the coroutine pool as the orchestration layer."
+> "We chose an in-process coroutine pool (N=1 by default, configurable via `WORKER_POOL_SIZE`) over `worker_threads` because the workload is **I/O-bound** — every job spends its time in DB roundtrips, not CPU. SQLite serializes writes globally, so adding OS threads wouldn't increase throughput; it would just create lock contention and `SQLITE_BUSY` retries. TypeORM's `DataSource` isn't shareable across thread isolates either, so each thread would need its own connection pool fighting the same write lock. The atomic claim is implemented at the DB layer with a conditional `UPDATE` — that race is real concurrency, resolved deterministically by the database. The default is pinned at 1 specifically because the shipped runtime shares one `AppDataSource` across coroutines, and concurrent `manager.transaction(...)` calls on a shared SQLite connection trip `SQLITE_ERROR: no such savepoint`; the lift condition is per-worker DataSources (Issue #17). If a future job became CPU-heavy (image transforms, heavy parsing), I'd offload only that step to `worker_threads` via Piscina, keeping the coroutine pool as the orchestration layer."
 
 If you can deliver that paragraph cleanly in an interview, you've demonstrated:
 - Workload-aware tool selection (not cargo-culting parallelism).
