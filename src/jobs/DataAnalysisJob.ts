@@ -1,11 +1,11 @@
-import { Job } from './Job';
-import { Task } from '../models/Task';
+import { Job, JobContext } from './Job';
 import booleanWithin from '@turf/boolean-within';
 import { Feature, Polygon } from 'geojson';
 import countryMapping from '../data/world_data.json';
 
 export class DataAnalysisJob implements Job {
-    async run(task: Task): Promise<string> {
+    async run(context: JobContext): Promise<string> {
+        const { task } = context;
         console.log(`Running data analysis for task ${task.taskId}...`);
 
         const inputGeometry: Feature<Polygon> = JSON.parse(task.geoJson);
