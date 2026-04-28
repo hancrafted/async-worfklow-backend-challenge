@@ -4,6 +4,7 @@ import { getJobForTaskType } from '../jobs/JobFactory';
 import {WorkflowStatus} from "../workflows/WorkflowFactory";
 import {Workflow} from "../models/Workflow";
 import {Result} from "../models/Result";
+import { serializeJobError } from '../utils/serializeJobError';
 
 export enum TaskStatus {
     Queued = 'queued',
@@ -30,24 +31,38 @@ export class TaskRunner {
 
         try {
             console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
-            const resultRepository = this.taskRepository.manager.getRepository(Result);
             const taskResult = await job.run(task);
             console.log(`Job ${task.taskType} for task ${task.taskId} completed successfully.`);
-            const result = new Result();
-            result.taskId = task.taskId!;
-            result.data = JSON.stringify(taskResult || {});
-            await resultRepository.save(result);
-            task.resultId = result.resultId!;
-            task.status = TaskStatus.Completed;
-            task.progress = null;
-            await this.taskRepository.save(task);
+
+            await this.taskRepository.manager.transaction(async (entityManager) => {
+                const resultRepository = entityManager.getRepository(Result);
+                const result = new Result();
+                result.taskId = task.taskId!;
+                result.data = JSON.stringify(taskResult || {});
+                await resultRepository.save(result);
+                task.resultId = result.resultId!;
+                task.status = TaskStatus.Completed;
+                task.progress = null;
+                await entityManager.getRepository(Task).save(task);
+            });
 
         } catch (error: any) {
             console.error(`Error running job ${task.taskType} for task ${task.taskId}:`, error);
 
-            task.status = TaskStatus.Failed;
-            task.progress = null;
-            await this.taskRepository.save(task);
+            const errorRecord = serializeJobError(error);
+            await this.taskRepository.manager.transaction(async (entityManager) => {
+                const resultRepository = entityManager.getRepository(Result);
+                const failureResult = new Result();
+                failureResult.taskId = task.taskId!;
+                failureResult.data = null;
+                failureResult.error = JSON.stringify(errorRecord);
+                await resultRepository.save(failureResult);
+
+                task.resultId = failureResult.resultId!;
+                task.status = TaskStatus.Failed;
+                task.progress = null;
+                await entityManager.getRepository(Task).save(task);
+            });
 
             throw error;
         }

@@ -18,6 +18,14 @@ Whenever the decision is made to optimize for the scope of this coding challenge
 - Run `npm test` frequently during the TDD loop and at the very end of every task before declaring it complete. Fix the code on failure — never skip a failing test.
 - After each task is implemented, document in `/interview/manual_test_plan.md` how to manually test the implemented task step by step (one section per task).
 
+## Tests
+
+Tests are structured one folder per coding challenge task. E.g. /tests/01-polygon-area/
+For each original requirement in the Readme.md there is a exactly one test file.
+Test must cover happy path in one describe block and at least one error path in another describe block. The purpose is for the reviewer to make sure and understand that the test serve to fullfil the requirements for each task.
+
+Add inline comments explaining the test, if the test is longer than 10 lines.
+
 ## Quality gates (Husky)
 
 The repo has two layered git hooks. They are unbypassable for both humans and agents (verified — see PRD §Task 0).
@@ -31,6 +39,56 @@ The repo has two layered git hooks. They are unbypassable for both humans and ag
 
 - One commit per task. Use conventional commits. In the commit description section add references to which tasks and which user story from the PRD was worked on or completed. The git log serves as a form of memory/documentation.
 
+## Style Guide
 
+### Naming
+
+1. No abbreviations
+
+### export ENUMs intead of magic strings
+
+For errors, states and other enummerables, define and export an ENUM instead of using magic strings.
+
+### Functions
+
+For complex functions use the following pattern
+
+1. Declare varibles at the top of the function
+2. Validate input, validation returns null if no error is found, throwing should happen in the main function, not in the validation function
+3. Perform main logic
+4. Return or cause side effects
+
+
+EXAMPLE:
+```js
+enum SomeClassValidationErrors {
+    ERROR_RESON_1:"ERROR_RESON_1",
+    ERROR_RESON_2:"ERROR_RESON_2",
+}
+
+class SomeClass {
+
+    run(input){
+        // declare varibles
+
+        // validate
+        const validationError = this.validate(input);
+        if(validationError){
+            throw new Error(validationError);
+        }
+        // perform main logic
+
+        // retrun or cause side effects
+
+    }
+
+    private validate(input): SomeClassValidationErrors | null{
+        const validationError:SomeClassValidationErrors | null = null;
+        // verform validtion
+        // if(...){validationError = SomeClassValidationErrors.ERROR_RESON_1}
+        return validationError;
+    }
+}
+```
 
 
