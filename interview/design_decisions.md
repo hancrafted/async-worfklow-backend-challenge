@@ -12,7 +12,7 @@ This document records pragmatic choices made for the scope of this coding challe
   - *Production-grade:* drain workers, refuse new claims, wait for in-flight tasks up to a configurable timeout, then exit.
 - **No authentication / authorization** on any endpoint.
   - *Production-grade:* API keys, JWT, or mTLS depending on deployment context; per-client rate limiting.
-- **Structured JSON-line logs to stdout** via a tiny in-house wrapper around `console.log` / `console.error`. No new dependencies; `jq` is the dev-mode pretty-printer.
+- **Structured JSON-line logs to stdout** via a tiny in-house wrapper (`src/utils/logger.ts`) around `console.log` / `console.error`. No new dependencies; `jq` is the dev-mode pretty-printer. `info` / `warn` write to stdout; `error` writes to stderr; the level field discriminates downstream. Each line carries `{ level, ts, workflowId?, taskId?, stepNumber?, taskType?, msg, error? }`; `error.stack` is truncated to ≤10 lines (mirrors `serializeJobError`).
   - *Production-grade:* swap the wrapper for `pino` (or similar) for zero-cost structured logging, log routing, correlation IDs, OpenTelemetry traces.
 - **Inline error helper, no Express error middleware.** A small `errorResponse(res, status, code, message)` is called from each route handler.
   - *Production-grade:* typed error classes + centralized middleware + RFC 7807 (problem+json) compliance with consistent logging hooks.

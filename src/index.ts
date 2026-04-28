@@ -4,6 +4,7 @@ import analysisRoutes from "./routes/analysisRoutes";
 import defaultRoute from "./routes/defaultRoute";
 import { taskWorker } from "./workers/taskWorker";
 import { AppDataSource } from "./data-source"; // Import the DataSource instance
+import * as logger from "./utils/logger";
 
 const app = express();
 app.use(express.json());
@@ -16,7 +17,7 @@ AppDataSource.initialize()
     taskWorker();
 
     app.listen(3000, () => {
-      console.log("Server is running at http://localhost:3000");
+      logger.info("server listening at http://localhost:3000");
     });
   })
-  .catch((error) => console.log(error));
+  .catch((error) => logger.error("startup failed", { error }));

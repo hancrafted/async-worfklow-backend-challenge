@@ -2,17 +2,20 @@ import "reflect-metadata";
 import path from "path";
 import express from "express";
 import request from "supertest";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DataSource } from "typeorm";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow } from "../../src/models/Workflow";
 import { TaskStatus } from "../../src/workers/taskRunner";
+import { tickOnce } from "../../src/workers/taskWorker";
 import {
   WorkflowStatus,
 } from "../../src/workflows/WorkflowFactory";
 import { createAnalysisRouter } from "../../src/routes/analysisRoutes";
 import { ApiErrorCode } from "../../src/utils/errorResponse";
+import { LogLevel } from "../../src/utils/logger";
+import { seedWorkflow } from "./helpers/seedWorkflow";
 
 const VALID_GEOJSON = {
   type: "Polygon",
@@ -200,6 +203,109 @@ describe("Readme §3 R2 — tasks can be chained through dependencies (creation 
       expect(response.status).toBe(400);
       expect((response.body as ErrorBody).error).toBe(ApiErrorCode.INVALID_PAYLOAD);
       await assertNoDbWrites();
+    });
+  });
+});
+
+interface CapturedLogLine {
+  level: LogLevel;
+  ts: string;
+  msg: string;
+  workflowId?: string;
+  taskId?: string;
+  stepNumber?: number;
+  taskType?: string;
+  error?: { message: string; stack?: string };
+}
+
+const parseLogCalls = (
+  spy: ReturnType<typeof vi.spyOn>,
+): CapturedLogLine[] =>
+  spy.mock.calls.map((call) => JSON.parse(call[0] as string) as CapturedLogLine);
+
+// PRD §11 / US22 — runner-level structured JSON-line logging. Drains a single
+// queued task through `tickOnce(...)` and asserts the runner emits the
+// documented log shape (`{ level, ts, workflowId, taskId, stepNumber,
+// taskType, msg, error? }`) on stdout (info) / stderr (error).
+describe("R3 — runner: structured JSON-line logging (US22)", () => {
+  let dataSource: DataSource;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    dataSource = buildDataSource();
+    await dataSource.initialize();
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    if (dataSource.isInitialized) await dataSource.destroy();
+  });
+
+  describe("happy path: info JSON lines around a successful job", () => {
+    it("emits 'starting job' and 'job completed' info lines with the PRD §11 context for the polygonArea step", async () => {
+      // Seed the canonical 3-step fixture; the deps-free polygonArea step (1)
+      // is the only `queued` candidate, so a single tickOnce drains exactly
+      // one task and produces the two info lines this requirement covers.
+      const { tasks } = await seedWorkflow(dataSource, "three-step-mixed-deps.yml");
+      const polygonStep = tasks.find((t) => t.stepNumber === 1)!;
+
+      const ran = await tickOnce(dataSource.getRepository(Task));
+      expect(ran).toBe(true);
+
+      const logLines = parseLogCalls(logSpy);
+      const startLine = logLines.find(
+        (line) => line.msg === "starting job" && line.taskId === polygonStep.taskId,
+      );
+      const doneLine = logLines.find(
+        (line) => line.msg === "job completed" && line.taskId === polygonStep.taskId,
+      );
+      expect(startLine).toMatchObject({
+        level: LogLevel.Info,
+        workflowId: polygonStep.workflowId,
+        taskId: polygonStep.taskId,
+        stepNumber: 1,
+        taskType: "polygonArea",
+      });
+      expect(new Date(startLine!.ts).toISOString()).toBe(startLine!.ts);
+      expect(doneLine).toMatchObject({
+        level: LogLevel.Info,
+        msg: "job completed",
+        stepNumber: 1,
+        taskType: "polygonArea",
+      });
+    });
+  });
+
+  describe("error path: error JSON line with serialized error.stack on a job exception", () => {
+    it("emits a 'job failed' error line with truncated stack when polygonArea throws", async () => {
+      // Pass a non-Polygon geoJson so PolygonAreaJob.validate() rejects; the
+      // runner catches, persists Failed, and must emit a structured error
+      // line on stderr including { message, stack } with stack ≤10 lines.
+      const { tasks } = await seedWorkflow(
+        dataSource,
+        "three-step-mixed-deps.yml",
+        { geoJson: { type: "Point", coordinates: [0, 0] } },
+      );
+      const polygonStep = tasks.find((t) => t.stepNumber === 1)!;
+
+      await tickOnce(dataSource.getRepository(Task));
+
+      const errorLines = parseLogCalls(errorSpy);
+      const failure = errorLines.find(
+        (line) => line.msg === "job failed" && line.taskId === polygonStep.taskId,
+      );
+      expect(failure).toMatchObject({
+        level: LogLevel.Error,
+        workflowId: polygonStep.workflowId,
+        taskId: polygonStep.taskId,
+        stepNumber: 1,
+        taskType: "polygonArea",
+      });
+      expect(failure!.error?.message).toMatch(/Invalid GeoJSON/);
+      expect(failure!.error?.stack?.split("\n").length).toBeLessThanOrEqual(10);
     });
   });
 });

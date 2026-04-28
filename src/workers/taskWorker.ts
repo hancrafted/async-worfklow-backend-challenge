@@ -3,6 +3,7 @@ import { AppDataSource } from '../data-source';
 import { Task } from '../models/Task';
 import { Workflow, WorkflowStatus } from '../models/Workflow';
 import { TaskRunner, TaskStatus } from './taskRunner';
+import * as logger from '../utils/logger';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -34,8 +35,13 @@ export async function tickOnce(taskRepository: Repository<Task>): Promise<boolea
         try {
             await taskRunner.run(candidate);
         } catch (error) {
-            console.error('Task execution failed. Task status has already been updated by TaskRunner.');
-            console.error(error);
+            logger.error('task execution failed; terminal state already persisted by TaskRunner', {
+                workflowId: candidate.workflowId,
+                taskId: candidate.taskId,
+                stepNumber: candidate.stepNumber,
+                taskType: candidate.taskType,
+                error,
+            });
         }
         return true;
     }

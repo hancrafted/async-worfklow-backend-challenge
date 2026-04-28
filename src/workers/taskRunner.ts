@@ -6,6 +6,7 @@ import { Workflow } from "../models/Workflow";
 import { Result } from "../models/Result";
 import type { JobDependencyOutput } from '../jobs/Job';
 import { serializeJobError, type SerializedJobError } from '../utils/serializeJobError';
+import * as logger from '../utils/logger';
 
 export enum TaskStatus {
     Queued = 'queued',
@@ -63,16 +64,20 @@ export class TaskRunner {
     /** Invokes the job and normalises success / failure into a JobOutcome. */
     private async executeJob(task: Task): Promise<JobOutcome> {
         const job = getJobForTaskType(task.taskType);
+        const logContext = {
+            workflowId: task.workflowId,
+            taskId: task.taskId,
+            stepNumber: task.stepNumber,
+            taskType: task.taskType,
+        };
         try {
-            // eslint-disable-next-line no-console -- TODO: replace with structured logger (PRD §Decision 11)
-            console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
+            logger.info('starting job', logContext);
             const dependencies = await this.buildDependencyEnvelope(task);
             const data = await job.run({ task, dependencies });
-            // eslint-disable-next-line no-console -- TODO: replace with structured logger (PRD §Decision 11)
-            console.log(`Job ${task.taskType} for task ${task.taskId} completed successfully.`);
+            logger.info('job completed', logContext);
             return { status: TaskStatus.Completed, data };
         } catch (error) {
-            console.error(`Error running job ${task.taskType} for task ${task.taskId}:`, error);
+            logger.error('job failed', { ...logContext, error });
             return { status: TaskStatus.Failed, error: serializeJobError(error), thrown: error };
         }
     }

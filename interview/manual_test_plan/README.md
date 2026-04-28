@@ -17,6 +17,7 @@ to the index below — do **not** append sections to this README.
 | §Task 3b-ii Wave 1 — Lifecycle refactor + initial → in_progress claim bump | [`03b-ii-wave-1_lifecycle-refactor-and-claim-bump.md`](./03b-ii-wave-1_lifecycle-refactor-and-claim-bump.md) |
 | §Task 3b-ii Wave 2 — Readiness promotion + dependency envelope | [`03b-ii-wave-2_readiness-promotion-and-dependency-envelope.md`](./03b-ii-wave-2_readiness-promotion-and-dependency-envelope.md) |
 | §Task 3b-ii Wave 3 — Fail-fast sweep + `workflow.failed` | [`03b-ii-wave-3_fail-fast-sweep-and-workflow-failed.md`](./03b-ii-wave-3_fail-fast-sweep-and-workflow-failed.md) |
+| §Task 3c-i Wave 1 — JSON-line structured logger (US22) | [`03c-i_json-line-logger.md`](./03c-i_json-line-logger.md) |
 
 ## Naming convention
 
