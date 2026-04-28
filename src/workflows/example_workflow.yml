@@ -19,6 +19,3 @@ steps:
   - taskType: "reportGeneration"
     stepNumber: 7
     dependsOn: [5, 6]
-  - taskType: "reportGeneration"
-    stepNumber: 7
-    dependsOn: [5,6]

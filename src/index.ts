@@ -32,6 +32,10 @@ app.use("/", defaultRoute);
 function registerShutdownHandlers(stopSignal: StopSignal): void {
   const handler = (signal: NodeJS.Signals): void => {
     if (stopSignal.stopped) return;
+    // Best-effort shutdown: flips StopSignal; per-worker DataSource destroy +
+    // AppDataSource destroy are intentionally omitted — Node process exit
+    // reaps SQLite connections cleanly. Bounded-timeout shutdown ceremony
+    // deferred (see Issue #17 Wave 1 task note Decision 2).
     logger.info("shutdown signal received — flipping worker pool stop signal", {
       taskType: signal,
     });
