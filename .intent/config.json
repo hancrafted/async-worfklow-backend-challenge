@@ -1,0 +1,16 @@
+{
+  "scripts": [
+    {
+      "name": "start",
+      "command": "yarn start",
+      "mode": "service",
+      "category": "dev"
+    },
+    {
+      "name": "dev",
+      "command": "yarn dev",
+      "mode": "service",
+      "category": "dev"
+    }
+  ]
+}

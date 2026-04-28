@@ -26,6 +26,8 @@ Test must cover happy path in one describe block and at least one error path in 
 
 Add inline comments explaining the test, if the test is longer than 10 lines.
 
+Unit tests should place next the the file they are testing. Only integration tests, which proof the requirments of each task are met are in /src/tests.
+
 ## Quality gates (Husky)
 
 The repo has two layered git hooks. They are unbypassable for both humans and agents (verified — see PRD §Task 0).
