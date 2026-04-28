@@ -47,17 +47,20 @@ describe("Pre-#7 shared test helpers — smoke (A5)", () => {
     setMockJobsByType({});
   });
 
-  describe("happy path: seed → drain → assert deps-free task completes", () => {
-    it("drains the one queued step and leaves dependents waiting (ranCount=1)", async () => {
-      // Arrange: register a passing job ONLY for `polygonArea` (step 1's
-      // taskType in three-step-mixed-deps.yml). Steps 2 & 3 stay `waiting`
-      // because their dependencies haven't completed yet, so the drain
-      // naturally stops after one tick — proving all three helpers wired
-      // together drive a workflow end-to-end.
+  describe("happy path: seed → drain → assert all tasks complete", () => {
+    it("drains the full chain end-to-end with Wave 2 promotion (ranCount=3)", async () => {
+      // Arrange: register passing jobs for all three taskTypes in
+      // three-step-mixed-deps.yml. Wave 2 promotion (PRD §Decision 9) flips
+      // each waiter to queued as its deps complete, so drainWorker walks the
+      // full chain — proving the helpers wire together end-to-end.
       const passingJob: Job = {
         run: () => Promise.resolve({ ok: true }),
       };
-      setMockJobsByType({ polygonArea: passingJob });
+      setMockJobsByType({
+        polygonArea: passingJob,
+        analysis: passingJob,
+        notification: passingJob,
+      });
 
       const { workflow, tasks } = await seedWorkflow(
         dataSource,
@@ -68,16 +71,16 @@ describe("Pre-#7 shared test helpers — smoke (A5)", () => {
       // Act
       const ranCount = await drainWorker(dataSource.getRepository(Task));
 
-      // Assert: drainWorker reports exactly one tick executed, the deps-free
-      // task is `completed`, and the dependent tasks remain `waiting`.
-      expect(ranCount).toBe(1);
+      // Assert: drainWorker reports three ticks executed (one per step) and
+      // every task transitioned to completed via promotion-driven readiness.
+      expect(ranCount).toBe(3);
       const refreshed = await dataSource
         .getRepository(Task)
         .find({ where: { workflowId: workflow.workflowId } });
       const byStep = new Map(refreshed.map((task) => [task.stepNumber, task]));
       expect(byStep.get(1)!.status).toBe(TaskStatus.Completed);
-      expect(byStep.get(2)!.status).toBe(TaskStatus.Waiting);
-      expect(byStep.get(3)!.status).toBe(TaskStatus.Waiting);
+      expect(byStep.get(2)!.status).toBe(TaskStatus.Completed);
+      expect(byStep.get(3)!.status).toBe(TaskStatus.Completed);
     });
   });
 

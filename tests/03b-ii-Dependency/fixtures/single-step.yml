@@ -1,0 +1,4 @@
+name: "single_step_lifecycle_fixture"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1

@@ -593,3 +593,459 @@ existing #7 test files (#7 itself will adopt them).
 Helpers are pure test-only modules; nothing to revert beyond `git revert`
 of the commit if needed.
 
+
+---
+
+## §Task 3b-ii Wave 1 — Lifecycle refactor + initial → in_progress claim bump
+
+**Branch:** `promotion,-sweep,-lifecycle`
+**PRD:** §Implementation Decisions 8, 9, 10 (Wave 1 of 3)
+
+This wave delivers two structural changes; Waves 2 and 3 (promotion, dependency
+envelope, fail-fast sweep, `finalResult`) follow.
+
+1. **Lifecycle refactor.** The post-task workflow status update is now part of
+   the same transaction as the terminal task write (CLAUDE.md §Transactions).
+   The lifecycle helper only flips the workflow to a terminal status
+   (`completed` / `failed`) when **every** task is terminal — premature
+   transitions on a partial failure are gone.
+2. **Claim-time workflow bump.** `tickOnce` wraps the conditional
+   `UPDATE tasks SET status='in_progress' WHERE status='queued'` in a
+   transaction that also issues an idempotent
+   `UPDATE workflows SET status='in_progress' WHERE status='initial'`. The
+   bump is naturally a no-op when the workflow has already moved past
+   `initial`.
+
+### Setup
+
+For the first manual flow you need a **multi-step** workflow so the lifecycle
+behavior is observable. Temporarily edit `src/workflows/example_workflow.yml`
+to a 2-step workflow with an unmet dependency (step 2 will stay `waiting`
+because Wave 2 promotion has not landed yet), then restart:
+
+```yaml
+# src/workflows/example_workflow.yml
+name: "wave_1_lifecycle"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]
+```
+
+```bash
+npm install   # only on a fresh clone
+npm start
+# → Server is running at http://localhost:3000
+```
+
+The worker polls every 5s; give each step that long to transition.
+
+### 1. Happy path — claim bump fires before the workflow ever reaches terminal
+
+```bash
+curl -sS -X POST http://localhost:3000/analysis \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "clientId": "manual-wave1-happy",
+    "geoJson": { "type": "Polygon",
+      "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]] }
+  }'
+# → 202 { "workflowId": "<uuid>", ... }
+```
+
+Immediately (< 5s, before the worker tick) check:
+
+```bash
+sqlite3 data/database.sqlite "SELECT workflowId, status FROM workflows;"
+# → status='initial' (no tick has run yet)
+```
+
+Wait ~5s for one tick, then re-check:
+
+```bash
+sqlite3 data/database.sqlite "SELECT status FROM workflows;"
+# → status='in_progress'
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks ORDER BY stepNumber;"
+# → step 1: completed   (job ran)
+# → step 2: waiting     (Wave 2 promotion not landed yet; expected)
+```
+
+The workflow is `in_progress` even though step 2 is still `waiting` — proves
+the claim transaction bumped the workflow before the job ran. The lifecycle
+helper saw a non-terminal task (step 2 `waiting`) and correctly **did not**
+flip the workflow to `completed`.
+
+> **Wave 1 scope note:** the workflow stays `in_progress` indefinitely while
+> step 2 sits `waiting` — promotion lands in Wave 2.
+
+### 2. Error path — failure-last keeps lifecycle correct
+
+The legacy bug: when the **last** terminal transition was a failure, the
+workflow stayed at `in_progress` because the lifecycle update lived outside
+the catch block. To exercise the fix, swap the example to a 2-step workflow
+where step 1 succeeds and step 2 will fail (we use a malformed payload that
+the analysis job rejects via the runner's catch path):
+
+```yaml
+# src/workflows/example_workflow.yml
+name: "wave_1_failure_last"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "polygonArea"
+    stepNumber: 2
+```
+
+> Both steps share the workflow's `geoJson`. We submit a request whose
+> payload is a valid Polygon (so step 1 succeeds) but small enough that it
+> trivially exercises the success path; the failure path is the unit-test
+> proof of the bug fix (`src/workers/taskRunner.test.ts` →
+> "marks the workflow Failed when the LAST terminal transition is a
+> failure"). Run it explicitly to see the regression-guard assertion:
+
+```bash
+npx vitest run src/workers/taskRunner.test.ts \
+  -t "marks the workflow Failed when the LAST terminal transition"
+# → 1 passed
+```
+
+The test seeds two `queued` tasks, runs the first to `completed`, then runs
+the second to `failed`. After the failure the workflow is observed as
+`failed` — the assertion would have read `in_progress` against the legacy
+code (lifecycle update was skipped on the throw branch).
+
+### 3. Idempotent bump — already-in-progress workflow is left alone
+
+This is also covered by an automated test. Run just that file:
+
+```bash
+npx vitest run src/workers/taskWorker.test.ts \
+  -t "does not re-bump or downgrade a workflow whose status is no longer initial"
+# → 1 passed
+```
+
+The test seeds a workflow already in `in_progress`, fires `tickOnce`, and
+confirms the post-claim workflow status is **not** `initial` (the conditional
+`WHERE status='initial'` UPDATE matched zero rows and the bump was a no-op).
+
+### 4. Cleanup
+
+```bash
+git checkout -- src/workflows/example_workflow.yml
+```
+
+`AppDataSource` boots with `dropSchema: true`, so every restart wipes the DB.
+
+### Observed results (2026-04-28, automated run)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 14 files / 62 tests passed (was 57) |
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+
+
+---
+
+## §Task 3b-ii Wave 2 — Readiness promotion + dependency envelope
+
+**Branch:** `promotion,-sweep,-lifecycle`
+**PRD:** §Implementation Decisions 5, 7, 9 (Wave 2 of 3)
+
+This wave wires `dependsOn` into actual scheduling. After every `completed`
+task transition, the runner promotes any waiting sibling whose deps are all
+satisfied (`waiting → queued`) inside the same post-task transaction as the
+terminal write and lifecycle eval. The dependent's `JobContext` now carries
+a real `dependencies[]` envelope built from upstream `Result.data`, sorted by
+`stepNumber` ascending.
+
+Wave 3 (fail-fast sweep + `finalResult`) is still pending; on a failure step 2
+remains `waiting` and the workflow stays `in_progress` until then.
+
+### Setup
+
+Stage a 2-step `dependsOn` workflow that exercises both deliverables (step 2
+depends on step 1 and receives step 1's output via the dep envelope):
+
+```yaml
+# src/workflows/example_workflow.yml
+name: "wave_2_promotion_envelope"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]
+```
+
+```bash
+npm install   # only on a fresh clone
+npm start
+# → Server is running at http://localhost:3000
+```
+
+The worker polls every 5s; allow ~5s per tick.
+
+### 1. Happy path — multi-step `dependsOn` runs end-to-end via promotion
+
+```bash
+curl -sS -X POST http://localhost:3000/analysis \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "clientId": "manual-wave2-happy",
+    "geoJson": { "type": "Polygon",
+      "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]] }
+  }'
+# → 202 { "workflowId": "<uuid>", ... }
+```
+
+Immediately:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks ORDER BY stepNumber;"
+# → step 1: queued
+# → step 2: waiting   (dependsOn: [step 1])
+```
+
+Wait ~5s for tick 1:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks ORDER BY stepNumber;"
+# → step 1: completed
+# → step 2: queued    (promoted by Wave 2 — was waiting)
+sqlite3 data/database.sqlite "SELECT status FROM workflows;"
+# → in_progress
+```
+
+Wait ~5s for tick 2:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks ORDER BY stepNumber;"
+# → step 1: completed
+# → step 2: completed
+sqlite3 data/database.sqlite "SELECT status FROM workflows;"
+# → completed
+```
+
+The workflow ran end-to-end via Wave 2 promotion — proves both deliverables.
+
+### 2. Envelope contents — step 2 received step 1's output
+
+Inspect the persisted `Result.data` rows to reconstruct what step 2's
+`context.dependencies[0].output` was at runtime. The envelope is built from
+the upstream `Result.data` JSON-parsed verbatim.
+
+```bash
+sqlite3 -header -column data/database.sqlite \
+  "SELECT t.stepNumber, t.taskType, r.data
+   FROM tasks t JOIN results r ON r.resultId = t.resultId
+   ORDER BY t.stepNumber;"
+# → step 1 polygonArea  {"areaSqMeters":...}   ← passed to step 2 as
+#                                                context.dependencies[0].output
+# → step 2 analysis     {"country":"...",...}  ← analysis's own output
+```
+
+The integration test
+`tests/03b-ii-Dependency/02-promotion-envelope.test.ts` (happy path) asserts
+the envelope shape (`{ stepNumber, taskType, taskId, output }`),
+`stepNumber` ascending sort, and `output` fidelity against the JSON-parsed
+upstream `Result.data`.
+
+### 3. Error path — failure on step 1 leaves step 2 unpromoted
+
+```yaml
+# src/workflows/example_workflow.yml — same 2-step shape
+# We trigger the failure by submitting a malformed GeoJSON so polygonArea
+# rejects in its own validator (Result.error written, task → failed).
+```
+
+```bash
+curl -sS -X POST http://localhost:3000/analysis \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "clientId": "manual-wave2-error",
+    "geoJson": { "type": "NotAPolygon" }
+  }'
+# → 202 { "workflowId": "<uuid>", ... }
+```
+
+Wait ~5s:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks ORDER BY stepNumber;"
+# → step 1: failed
+# → step 2: waiting   (NOT promoted — promotion only fires on Completed)
+sqlite3 data/database.sqlite "SELECT status FROM workflows;"
+# → in_progress       (Wave 3 sweep will flip this to failed)
+```
+
+> **Wave 2 scope note:** the workflow stays `in_progress` because step 2 is
+> still `waiting` (non-terminal), so the lifecycle eval sees `allTerminal=false`.
+> Wave 3's fail-fast sweep flips waiting/queued siblings to `skipped` and
+> closes the workflow as `failed` immediately on the first failure.
+
+### 4. Cleanup
+
+```bash
+git checkout -- src/workflows/example_workflow.yml
+```
+
+`AppDataSource` boots with `dropSchema: true`, so every restart wipes the DB.
+
+### Observed results (2026-04-28, automated run)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 16 files / 73 tests passed (was 66) |
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+
+
+---
+
+## §Task 3b-ii Wave 3 — Fail-fast sweep + `workflow.failed`
+
+**Branch:** `promotion,-sweep,-lifecycle`
+**PRD:** §Implementation Decision 2 (Wave 3 of 3)
+**Issue:** [#7](https://github.com/hancrafted/async-worfklow-backend-challenge/issues/7)
+
+When any task transitions to `failed`, the runner sweeps every `waiting`/`queued`
+sibling to `skipped` in the same post-task transaction and the lifecycle eval
+closes the workflow as `failed`. `in_progress` siblings are left running (PRD
+non-goal — no cancellation of in-flight jobs).
+
+### Setup
+
+Stage the same 2-step `dependsOn` workflow as Wave 2; the failure path is
+exercised by submitting a malformed GeoJSON that the first step's validator
+rejects:
+
+```yaml
+# src/workflows/example_workflow.yml
+name: "wave_3_fail_fast"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]
+```
+
+```bash
+npm install   # only on a fresh clone
+npm start
+# → Server is running at http://localhost:3000
+```
+
+### 1. Happy path — step 1 fails → step 2 swept to skipped → workflow failed
+
+Submit a malformed payload (`type: "NotAPolygon"`) so `PolygonAreaJob`'s
+validator throws and the runner enters the Failed branch:
+
+```bash
+curl -sS -X POST http://localhost:3000/analysis \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "clientId": "manual-wave3-happy",
+    "geoJson": { "type": "NotAPolygon" }
+  }'
+# → 202 { "workflowId": "<uuid>", ... }
+```
+
+Wait ~5s, then verify in the DB:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks ORDER BY stepNumber;"
+# → step 1: failed
+# → step 2: skipped   (Wave 3 sweep — was waiting before the tick)
+sqlite3 data/database.sqlite "SELECT status FROM workflows;"
+# → failed            (Wave 3 lifecycle eval flipped this in the same txn)
+```
+
+The persisted state proves all three: sweep flipped the waiter to `skipped`,
+the lifecycle eval observed `allTerminal && anyFailed`, and the workflow
+transitioned to `failed` — all inside the post-task transaction.
+
+Inspect the failed step's persisted error envelope:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT data, error FROM results WHERE resultId IN (
+     SELECT resultId FROM tasks WHERE clientId='manual-wave3-happy' AND status='failed'
+   );"
+# → data = (NULL)
+# → error = '{"message":"Invalid GeoJSON: ...","reason":"job_error","stack":"..."}'
+```
+
+`skipped` tasks have no `Result` row — the status itself is the explanation
+(PRD §Decision 2). Confirm:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT taskId, resultId FROM tasks WHERE clientId='manual-wave3-happy' AND status='skipped';"
+# → resultId = (NULL)
+```
+
+### 2. Error path — successful workflow is unaffected by the sweep code path
+
+Re-submit a valid GeoJSON to confirm the Completed branch is untouched (sweep
+only fires on Failed):
+
+```bash
+curl -sS -X POST http://localhost:3000/analysis \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "clientId": "manual-wave3-control",
+    "geoJson": { "type": "Polygon",
+      "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]] }
+  }'
+```
+
+Wait ~10s (two ticks), then:
+
+```bash
+sqlite3 data/database.sqlite \
+  "SELECT stepNumber, status FROM tasks WHERE clientId='manual-wave3-control'
+   ORDER BY stepNumber;"
+# → step 1: completed
+# → step 2: completed
+sqlite3 data/database.sqlite \
+  "SELECT status FROM workflows
+   WHERE workflowId IN (SELECT workflowId FROM tasks WHERE clientId='manual-wave3-control');"
+# → completed
+```
+
+The `in_progress`-sibling-survives-the-sweep behavior is covered by the unit
+test `src/workers/taskRunner.test.ts` →
+"leaves in_progress siblings untouched when the parent transition is Failed":
+
+```bash
+npx vitest run src/workers/taskRunner.test.ts \
+  -t "leaves in_progress siblings untouched"
+# → 1 passed
+```
+
+### 3. Cleanup
+
+```bash
+git checkout -- src/workflows/example_workflow.yml
+```
+
+`AppDataSource` boots with `dropSchema: true`, so every restart wipes the DB.
+
+### Observed results (2026-04-28, automated run)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 17 files / 78 tests passed (was 73) |
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npx vitest run tests/03b-ii-Dependency/` | 3 files / 6 tests passed (Waves 1+2+3) |

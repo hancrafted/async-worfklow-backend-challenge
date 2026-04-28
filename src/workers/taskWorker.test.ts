@@ -26,13 +26,16 @@ const buildDataSource = (): DataSource =>
     logging: false,
   });
 
-async function seedQueuedTask(dataSource: DataSource): Promise<Task> {
+async function seedQueuedTask(
+  dataSource: DataSource,
+  workflowStatus: WorkflowStatus = WorkflowStatus.Initial,
+): Promise<Task> {
   const workflowRepository = dataSource.getRepository(Workflow);
   const taskRepository = dataSource.getRepository(Task);
   const workflow = await workflowRepository.save(
     Object.assign(new Workflow(), {
       clientId: "c1",
-      status: WorkflowStatus.Initial,
+      status: workflowStatus,
     }),
   );
   return taskRepository.save(
@@ -106,6 +109,74 @@ describe("tickOnce — atomic-claim worker tick (PRD §10)", () => {
 
       const sorted = [...results].sort();
       expect(sorted).toEqual([false, true]);
+    });
+  });
+});
+
+
+describe("tickOnce — initial → in_progress claim bump (PRD §Decision 9, Wave 1)", () => {
+  let dataSource: DataSource;
+  let taskRepository: Repository<Task>;
+
+  beforeEach(async () => {
+    dataSource = buildDataSource();
+    await dataSource.initialize();
+    taskRepository = dataSource.getRepository(Task);
+    getJobMock.mockReset();
+  });
+
+  afterEach(async () => {
+    if (dataSource.isInitialized) await dataSource.destroy();
+  });
+
+  describe("happy path", () => {
+    it("bumps the workflow from initial to in_progress in the same transaction as the claim", async () => {
+      // The job inspects the workflow's status at run time. Since the bump
+      // happens in the claim transaction (which commits before the job runs),
+      // the observed status must already be in_progress — proving the bump
+      // is wired into the claim, not deferred until post-task lifecycle.
+      let observedStatus: WorkflowStatus | null = null;
+      const observingJob: Job = {
+        run: async ({ task }) => {
+          const workflow = await dataSource.getRepository(Workflow).findOneOrFail({
+            where: { workflowId: task.workflowId },
+          });
+          observedStatus = workflow.status;
+          return { ok: true };
+        },
+      };
+      getJobMock.mockReturnValue(observingJob);
+
+      const seeded = await seedQueuedTask(dataSource, WorkflowStatus.Initial);
+
+      const ran = await tickOnce(taskRepository);
+
+      expect(ran).toBe(true);
+      expect(observedStatus).toBe(WorkflowStatus.InProgress);
+      // The seed is for context; the workflow row is the actual assertion target.
+      expect(seeded.workflowId).toBeTruthy();
+    });
+  });
+
+  describe("error path — bump is idempotent", () => {
+    it("does not re-bump or downgrade a workflow whose status is no longer initial", async () => {
+      // Seed the workflow already in the in_progress state (e.g. claimed
+      // earlier by a peer worker). The claim's UPDATE WHERE status='initial'
+      // affects 0 rows, so the workflow status must remain in_progress
+      // throughout the run.
+      getJobMock.mockReturnValue(noopJob);
+      const seeded = await seedQueuedTask(dataSource, WorkflowStatus.InProgress);
+
+      const ran = await tickOnce(taskRepository);
+      expect(ran).toBe(true);
+
+      // After single-task workflow runs, lifecycle takes it terminal. The
+      // assertion of interest is that the claim's bump did not throw or
+      // misbehave when the WHERE clause matched zero rows.
+      const workflow = await dataSource.getRepository(Workflow).findOneOrFail({
+        where: { workflowId: seeded.workflowId },
+      });
+      expect(workflow.status).not.toBe(WorkflowStatus.Initial);
     });
   });
 });
