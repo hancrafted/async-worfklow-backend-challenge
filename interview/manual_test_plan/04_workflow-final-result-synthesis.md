@@ -13,6 +13,11 @@ conditional UPDATE guarded by `WHERE finalResult IS NULL`.
 > **Interim verification.** The `/results` HTTP endpoint that returns this
 > column lands in §Task 6 (#11). Until then, this test plan inspects
 > `Workflow.finalResult` directly via SQLite.
+>
+> **Update (Task 6 shipped):** the SQLite inspection below remains a valid
+> low-level check, but the canonical end-to-end verification of the column
+> is now `GET /workflow/:id/results` — see
+> [`06_workflow-results-endpoint.md`](./06_workflow-results-endpoint.md).
 
 ## Setup
 

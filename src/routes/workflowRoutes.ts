@@ -1,11 +1,21 @@
 import { Router } from 'express';
-import type { DataSource } from 'typeorm';
+import { In, IsNull, type DataSource, type EntityManager } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import type { Task } from '../models/Task';
-import { Workflow } from '../models/Workflow';
+import { Result } from '../models/Result';
+import { Workflow, WorkflowStatus } from '../models/Workflow';
 import { TaskStatus } from '../workers/taskRunner';
 import { ApiErrorCode, errorResponse } from '../utils/errorResponse';
 import { JobErrorReason } from '../utils/serializeJobError';
+import {
+    synthesizeFinalResult,
+    type FinalResultPayload,
+} from '../workflows/synthesizeFinalResult';
+
+const TERMINAL_WORKFLOW_STATUSES: ReadonlySet<WorkflowStatus> = new Set([
+    WorkflowStatus.Completed,
+    WorkflowStatus.Failed,
+]);
 
 interface CreateWorkflowRouterOptions {
     dataSource: DataSource;
@@ -95,7 +105,77 @@ export function createWorkflowRouter(
         });
     });
 
+    router.get('/:id/results', async (req, res) => {
+        const workflowId = req.params.id;
+        const workflow = await options.dataSource.getRepository(Workflow).findOne({
+            where: { workflowId },
+            relations: ['tasks'],
+        });
+        if (!workflow) {
+            errorResponse(
+                res,
+                404,
+                ApiErrorCode.WORKFLOW_NOT_FOUND,
+                `Workflow with id '${workflowId}' was not found`,
+            );
+            return;
+        }
+        if (!TERMINAL_WORKFLOW_STATUSES.has(workflow.status)) {
+            errorResponse(
+                res,
+                400,
+                ApiErrorCode.WORKFLOW_NOT_TERMINAL,
+                `Workflow with id '${workflowId}' is not terminal (status: ${workflow.status})`,
+            );
+            return;
+        }
+
+        let finalResult: FinalResultPayload;
+        if (workflow.finalResult !== null) {
+            finalResult = JSON.parse(workflow.finalResult) as FinalResultPayload;
+        } else {
+            finalResult = await options.dataSource.transaction((entityManager) =>
+                applyLazyFinalResultPatch(entityManager, workflow),
+            );
+        }
+
+        res.status(200).json({
+            workflowId: workflow.workflowId,
+            status: workflow.status,
+            finalResult,
+        });
+    });
+
     return router;
+}
+
+/**
+ * Lazy-patch helper for `Workflow.finalResult` (PRD §Implementation Decision
+ * 8 / Task 6). Loads the workflow's `Result` rows, synthesizes the public
+ * payload via the shared `synthesizeFinalResult(...)` helper (single source
+ * of truth — same shape the runner persists eagerly), and conditionally
+ * persists the column under `WHERE finalResult IS NULL` so concurrent eager
+ * writes always win. Returns the synthesized payload regardless of whether
+ * the UPDATE matched — the read handler returns this to the caller.
+ *
+ * Never advances workflow lifecycle (PRD §Decision 13 — only the runner does).
+ */
+export async function applyLazyFinalResultPatch(
+    entityManager: EntityManager,
+    workflow: Workflow,
+): Promise<FinalResultPayload> {
+    const taskIds = workflow.tasks.map((task) => task.taskId);
+    const results = taskIds.length === 0
+        ? []
+        : await entityManager.getRepository(Result).find({
+            where: { taskId: In(taskIds) },
+        });
+    const payload = synthesizeFinalResult(workflow, workflow.tasks, results);
+    await entityManager.getRepository(Workflow).update(
+        { workflowId: workflow.workflowId, finalResult: IsNull() },
+        { finalResult: JSON.stringify(payload) },
+    );
+    return payload;
 }
 
 const defaultRouter = createWorkflowRouter({ dataSource: AppDataSource });
