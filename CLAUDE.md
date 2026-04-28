@@ -28,6 +28,14 @@ Add inline comments explaining the test, if the test is longer than 10 lines.
 
 Unit tests should place next the the file they are testing. Only integration tests, which proof the requirments of each task are met are in /src/tests.
 
+### Worker-loop tests
+
+Integration tests that exercise the worker loop must use the `drainWorker(...)` helper (manual synchronous drain). Never use `setTimeout` or real timers in worker code paths; never use `vi.useFakeTimers()` to stub the worker sleep.
+
+## Transactions
+
+Any sequence of writes that mutates more than one row, or mutates a row plus persists a related row, must be wrapped in `dataSource.transaction(...)`. Promotion / sweep / lifecycle updates that follow a task's terminal transition belong in the same transaction as the terminal write.
+
 ## Quality gates (Husky)
 
 The repo has two layered git hooks. They are unbypassable for both humans and agents (verified — see PRD §Task 0).

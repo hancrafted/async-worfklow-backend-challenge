@@ -26,7 +26,6 @@ export class TaskRunner {
      * @throws If the job fails, it rethrows the error.
      */
     async run(task: Task): Promise<void> {
-        task.status = TaskStatus.InProgress;
         task.progress = 'starting job...';
         await this.taskRepository.save(task);
         const job = getJobForTaskType(task.taskType);
