@@ -5,7 +5,7 @@ export class EmailNotificationJob implements Job {
         const { task } = context;
         console.log(`Sending email notification for task ${task.taskId}...`);
         // Perform notification work
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         console.log('Email sent!');
     }
 }
