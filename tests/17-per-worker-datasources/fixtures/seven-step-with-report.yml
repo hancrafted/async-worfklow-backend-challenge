@@ -1,4 +1,8 @@
-name: "example_workflow"
+# Issue #17 Wave 1 — 7-step DAG used by the production reproduction test.
+# Topology mirrors src/workflows/example_workflow.yml plus a reportGeneration
+# fan-in at step 7 to exercise concurrent claims across heterogeneous task
+# types. Step 3 was the production hang site (see Issue #17 description).
+name: "issue_17_seven_step"
 steps:
   - taskType: "polygonArea"
     stepNumber: 1
@@ -19,6 +23,3 @@ steps:
   - taskType: "reportGeneration"
     stepNumber: 7
     dependsOn: [5, 6]
-  - taskType: "reportGeneration"
-    stepNumber: 7
-    dependsOn: [5,6]
