@@ -1,12 +1,13 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DataSource, type Repository } from "typeorm";
-import { tickOnce } from "./taskWorker";
+import { tickOnce, runWorkerLoop, type StopSignal } from "./taskWorker";
 import { TaskStatus } from "./taskRunner";
 import { Task } from "../models/Task";
 import { Result } from "../models/Result";
 import { Workflow } from "../models/Workflow";
 import { WorkflowStatus } from "../workflows/WorkflowFactory";
+import { LogLevel } from "../utils/logger";
 import type { Job } from "../jobs/Job";
 
 // `tickOnce` calls `getJobForTaskType` indirectly via TaskRunner. Mock the
@@ -177,6 +178,104 @@ describe("tickOnce — initial → in_progress claim bump (PRD §Decision 9, Wav
         where: { workflowId: seeded.workflowId },
       });
       expect(workflow.status).not.toBe(WorkflowStatus.Initial);
+    });
+  });
+});
+
+
+interface CapturedLogLine {
+  level: LogLevel;
+  ts: string;
+  msg: string;
+  error?: { message: string; stack?: string };
+}
+
+// PRD §11 / US21 — runner-level exceptions are transient. The loop wraps
+// `tickFn` in try/catch, logs at error, sleeps, and never propagates.
+describe("runWorkerLoop — loop-of-last-resort (US21)", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe("happy path", () => {
+    it("invokes tickFn until stopSignal flips and never sleeps when work was found", async () => {
+      // tickFn flips the stop signal from inside its own body after one
+      // successful (work-found) tick; the loop must observe the flip on its
+      // next predicate check and exit without invoking sleepFn at all.
+      const stopSignal: StopSignal = { stopped: false };
+      const sleepFn = vi.fn(async () => {});
+      const tickFn = vi.fn(async () => {
+        stopSignal.stopped = true;
+        return true;
+      });
+
+      await runWorkerLoop({ tickFn, sleepMs: 5000, sleepFn, stopSignal });
+
+      expect(tickFn).toHaveBeenCalledTimes(1);
+      expect(sleepFn).not.toHaveBeenCalled();
+    });
+
+    it("sleeps and logs warn when tickFn returns false (queue empty)", async () => {
+      // Empty queue path: tickFn returns false on call 1, then flips stop on
+      // call 2. The loop must invoke sleepFn between the two and emit a warn
+      // JSON line with msg signalling the idle no-op.
+      const stopSignal: StopSignal = { stopped: false };
+      const sleepFn = vi.fn(async () => {});
+      let calls = 0;
+      const tickFn = vi.fn(async () => {
+        calls += 1;
+        if (calls >= 2) stopSignal.stopped = true;
+        return false;
+      });
+
+      await runWorkerLoop({ tickFn, sleepMs: 5000, sleepFn, stopSignal });
+
+      expect(sleepFn).toHaveBeenCalledWith(5000);
+      const warnLines = logSpy.mock.calls
+        .map((c) => JSON.parse(c[0] as string) as CapturedLogLine)
+        .filter((l) => l.level === LogLevel.Warn);
+      expect(warnLines.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("error path: runner-level exception is transient", () => {
+    it("logs error, sleeps, and the second tick succeeds without propagation", async () => {
+      // Call 1 throws, call 2 returns true and flips the stop signal. The
+      // loop must catch the throw, emit a structured error JSON line carrying
+      // the original message, sleep once, and then the resolved promise must
+      // not reject — proving the worker survives a runner-level exception.
+      const stopSignal: StopSignal = { stopped: false };
+      const sleepFn = vi.fn(async () => {});
+      let calls = 0;
+      const tickFn = vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("transient db blip");
+        stopSignal.stopped = true;
+        return true;
+      });
+
+      await expect(
+        runWorkerLoop({ tickFn, sleepMs: 5000, sleepFn, stopSignal }),
+      ).resolves.toBeUndefined();
+
+      expect(tickFn).toHaveBeenCalledTimes(2);
+      expect(sleepFn).toHaveBeenCalledTimes(1);
+      const errorLines = errorSpy.mock.calls.map(
+        (c) => JSON.parse(c[0] as string) as CapturedLogLine,
+      );
+      expect(errorLines).toHaveLength(1);
+      expect(errorLines[0]).toMatchObject({
+        level: LogLevel.Error,
+        error: { message: "transient db blip" },
+      });
     });
   });
 });

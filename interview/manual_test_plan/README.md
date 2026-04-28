@@ -18,6 +18,7 @@ to the index below — do **not** append sections to this README.
 | §Task 3b-ii Wave 2 — Readiness promotion + dependency envelope | [`03b-ii-wave-2_readiness-promotion-and-dependency-envelope.md`](./03b-ii-wave-2_readiness-promotion-and-dependency-envelope.md) |
 | §Task 3b-ii Wave 3 — Fail-fast sweep + `workflow.failed` | [`03b-ii-wave-3_fail-fast-sweep-and-workflow-failed.md`](./03b-ii-wave-3_fail-fast-sweep-and-workflow-failed.md) |
 | §Task 3c-i Wave 1 — JSON-line structured logger (US22) | [`03c-i_json-line-logger.md`](./03c-i_json-line-logger.md) |
+| §Task 3c-ii Wave 2 — Loop-of-last-resort + transient runner errors (US21) | [`03c-ii_loop-of-last-resort.md`](./03c-ii_loop-of-last-resort.md) |
 
 ## Naming convention
 

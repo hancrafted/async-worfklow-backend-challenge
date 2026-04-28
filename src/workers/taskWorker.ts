@@ -72,13 +72,59 @@ async function claimTaskAndBumpWorkflow(
     });
 }
 
-export async function taskWorker(): Promise<void> {
-    const taskRepository = AppDataSource.getRepository(Task);
+/** Mutable shutdown signal shared between the loop and its driver. */
+export interface StopSignal {
+    stopped: boolean;
+}
 
-    while (true) {
-        const ran = await tickOnce(taskRepository);
-        if (!ran) {
-            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+export type TickFn = () => Promise<boolean>;
+export type SleepFn = (sleepMs: number) => Promise<void>;
+
+export interface RunWorkerLoopOptions {
+    tickFn: TickFn;
+    sleepMs: number;
+    sleepFn?: SleepFn;
+    stopSignal: StopSignal;
+}
+
+const realSleep: SleepFn = (sleepMs) =>
+    new Promise((resolve) => setTimeout(resolve, sleepMs));
+
+/**
+ * Loop-of-last-resort (PRD §11 / US21). Wraps `tickFn` in try/catch so any
+ * runner-level exception is swallowed, logged at `error`, followed by a
+ * `sleepFn(sleepMs)` cool-down, and the loop continues. Tests inject a no-op
+ * `sleepFn` and flip `stopSignal.stopped` from inside the spy `tickFn` to
+ * drive a deterministic, real-timer-free drain (CLAUDE.md §Worker-loop tests).
+ */
+export async function runWorkerLoop({
+    tickFn,
+    sleepMs,
+    sleepFn = realSleep,
+    stopSignal,
+}: RunWorkerLoopOptions): Promise<void> {
+    while (!stopSignal.stopped) {
+        try {
+            const ran = await tickFn();
+            if (stopSignal.stopped) return;
+            if (!ran) {
+                logger.warn('worker idle — queue empty, sleeping');
+                await sleepFn(sleepMs);
+            }
+        } catch (error) {
+            logger.error('runner-level exception (transient); worker continues', { error });
+            if (stopSignal.stopped) return;
+            await sleepFn(sleepMs);
         }
     }
+}
+
+export async function taskWorker(): Promise<void> {
+    const taskRepository = AppDataSource.getRepository(Task);
+    const stopSignal: StopSignal = { stopped: false };
+    await runWorkerLoop({
+        tickFn: () => tickOnce(taskRepository),
+        sleepMs: POLL_INTERVAL_MS,
+        stopSignal,
+    });
 }

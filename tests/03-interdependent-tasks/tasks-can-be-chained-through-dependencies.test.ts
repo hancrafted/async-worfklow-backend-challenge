@@ -8,7 +8,7 @@ import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow } from "../../src/models/Workflow";
 import { TaskStatus } from "../../src/workers/taskRunner";
-import { tickOnce } from "../../src/workers/taskWorker";
+import { tickOnce, runWorkerLoop, type StopSignal } from "../../src/workers/taskWorker";
 import {
   WorkflowStatus,
 } from "../../src/workflows/WorkflowFactory";
@@ -306,6 +306,130 @@ describe("R3 — runner: structured JSON-line logging (US22)", () => {
       });
       expect(failure!.error?.message).toMatch(/Invalid GeoJSON/);
       expect(failure!.error?.stack?.split("\n").length).toBeLessThanOrEqual(10);
+    });
+  });
+});
+
+
+// PRD §11 / US21 — runner-level exceptions are transient. The worker loop is
+// the layer of last resort: any throw escaping `tickOnce` (e.g. a DB blip in
+// the claim transaction) is caught, logged at error, and the loop continues
+// — the worker never dies. Drives the real `runWorkerLoop` against a real
+// repository; the no-op `sleepFn` keeps the test deterministic per
+// CLAUDE.md §Worker-loop tests.
+describe("R3 — runner: runner-level exceptions are transient (US21)", () => {
+  let dataSource: DataSource;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    dataSource = buildDataSource();
+    await dataSource.initialize();
+    // Silence stdout info/warn lines emitted by the runner during the test.
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    if (dataSource.isInitialized) await dataSource.destroy();
+  });
+
+  describe("happy path: worker survives a transient claim-transaction error", () => {
+    it("logs error, sleeps, and the next iteration drains a real seeded task", async () => {
+      // Seed the canonical 3-step fixture; step 1 (polygonArea) is the only
+      // queued candidate. Stub `manager.transaction` to throw on its first
+      // invocation only — this simulates a transient DB blip during the claim
+      // — then fall through to the real implementation. The loop must catch
+      // the throw, emit a structured error JSON line, sleep (no-op here),
+      // and on the next iteration drain the task to Completed.
+      const { tasks } = await seedWorkflow(
+        dataSource,
+        "three-step-mixed-deps.yml",
+      );
+      const polygonStep = tasks.find((t) => t.stepNumber === 1)!;
+
+      const taskRepository = dataSource.getRepository(Task);
+      const transactionSpy = vi.spyOn(dataSource.manager, "transaction");
+      transactionSpy.mockRejectedValueOnce(
+        new Error("transient db blip in claim"),
+      );
+
+      const stopSignal: StopSignal = { stopped: false };
+      let tickCalls = 0;
+      const tickFn = async (): Promise<boolean> => {
+        tickCalls += 1;
+        const ran = await tickOnce(taskRepository);
+        // Stop after the second tick (call 1 throws inside the claim, call 2
+        // drains the seeded task). Bound is 5 to surface a runaway loop.
+        if (tickCalls >= 2) stopSignal.stopped = true;
+        if (tickCalls > 5) throw new Error("runaway loop guard tripped");
+        return ran;
+      };
+
+      await runWorkerLoop({
+        tickFn,
+        sleepMs: 5000,
+        sleepFn: async () => {},
+        stopSignal,
+      });
+
+      const refreshed = await taskRepository.findOneOrFail({
+        where: { taskId: polygonStep.taskId },
+      });
+      expect(refreshed.status).toBe(TaskStatus.Completed);
+
+      const errorLines = errorSpy.mock.calls.map(
+        (c) => JSON.parse(c[0] as string) as CapturedLogLine,
+      );
+      const transient = errorLines.find(
+        (l) => l.error?.message === "transient db blip in claim",
+      );
+      expect(transient).toBeDefined();
+      expect(transient!.level).toBe(LogLevel.Error);
+      expect(transient!.msg).toMatch(/runner-level exception/);
+    });
+  });
+
+  describe("error path: a job-level exception is NOT a runner-level exception", () => {
+    it("a failed PolygonAreaJob is captured by TaskRunner; runWorkerLoop's catch is never entered", async () => {
+      // Layered-catch invariant. Pass a Point geoJson so PolygonAreaJob
+      // throws; TaskRunner catches it, persists Failed, and `tickOnce`
+      // returns true normally. The runWorkerLoop catch handler must therefore
+      // never see this error — proving the runner-level loop only fires for
+      // exceptions that escape TaskRunner (US21 vs US20 isolation).
+      const { tasks } = await seedWorkflow(
+        dataSource,
+        "three-step-mixed-deps.yml",
+        { geoJson: { type: "Point", coordinates: [0, 0] } },
+      );
+      const polygonStep = tasks.find((t) => t.stepNumber === 1)!;
+
+      const stopSignal: StopSignal = { stopped: false };
+      const tickFn = async (): Promise<boolean> => {
+        const ran = await tickOnce(dataSource.getRepository(Task));
+        stopSignal.stopped = true;
+        return ran;
+      };
+
+      await runWorkerLoop({
+        tickFn,
+        sleepMs: 5000,
+        sleepFn: async () => {},
+        stopSignal,
+      });
+
+      const errorLines = errorSpy.mock.calls.map(
+        (c) => JSON.parse(c[0] as string) as CapturedLogLine,
+      );
+      const runnerLevel = errorLines.find((l) =>
+        /runner-level exception/.test(l.msg),
+      );
+      expect(runnerLevel).toBeUndefined();
+
+      const refreshed = await dataSource.getRepository(Task).findOneOrFail({
+        where: { taskId: polygonStep.taskId },
+      });
+      expect(refreshed.status).toBe(TaskStatus.Failed);
     });
   });
 });
