@@ -145,7 +145,7 @@ The starter's `queued` semantic ("in the worker's pickup queue") is preserved. A
 
 ### 10. Concurrency — in-process worker pool
 
-The system runs a configurable pool of N concurrent workers within the same Node process (default `N=3`, override via `WORKER_POOL_SIZE` env var). All workers share a single `AppDataSource`. Workers are coroutines on the same event loop, not OS threads — appropriate for the DB-bound + light-CPU workload here.
+The system runs a configurable pool of N concurrent workers within the same Node process (default `N=1`, override via `WORKER_POOL_SIZE` env var). All workers share a single `AppDataSource`. Workers are coroutines on the same event loop, not OS threads — appropriate for the DB-bound + light-CPU workload here. Default pinned at 1 because the shared `AppDataSource` (= one SQLite connection) cannot host concurrent `BEGIN`/`SAVEPOINT`/`COMMIT` boundaries from multiple coroutines; lifted by issue #17 (per-worker DataSources). See `interview/design_decisions.md` §Task 7.
 
 - **Per-worker loop:** atomically claim the next `queued` task → run it → loop immediately. On a lost claim race (`rowsAffected === 0`), immediately try the next candidate; do not sleep. Sleep 5 seconds only when no `queued` task exists at all.
 - **Atomic claim:** `UPDATE tasks SET status='in_progress' WHERE taskId=? AND status='queued'`, checking `rowsAffected === 1`. The same transaction also bumps `workflows.status` from `initial → in_progress` when applicable.

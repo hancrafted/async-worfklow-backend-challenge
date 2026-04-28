@@ -129,8 +129,20 @@ export async function taskWorker(): Promise<void> {
     });
 }
 
-/** Default in-process worker pool size when WORKER_POOL_SIZE is unset. */
-export const DEFAULT_WORKER_POOL_SIZE = 3;
+/**
+ * Default in-process worker pool size when WORKER_POOL_SIZE is unset.
+ *
+ * Pinned to 1 because the production runtime shares one `AppDataSource`
+ * (= one SQLite connection) across every worker coroutine, and TypeORM's
+ * `manager.transaction(...)` cannot interleave `BEGIN`/`SAVEPOINT`/`COMMIT`
+ * boundaries on a shared connection — concurrent calls trip
+ * `SQLITE_ERROR: no such savepoint`. This is the same substrate limitation
+ * the integration tests work around with a per-pool mutex
+ * (`tests/03-interdependent-tasks/helpers/drainPool.ts`). Lifted by Issue
+ * #17 (per-worker DataSources); raise the default back to N>1 once that
+ * lands. See `interview/design_decisions.md` §Task 7.
+ */
+export const DEFAULT_WORKER_POOL_SIZE = 1;
 
 export enum WorkerPoolConfigError {
     INVALID_POOL_SIZE = 'INVALID_POOL_SIZE',
@@ -153,10 +165,11 @@ export class WorkerPoolConfigValidationError extends Error {
 
 /**
  * Parses the `WORKER_POOL_SIZE` env value (raw string from `process.env`) and
- * returns the resolved pool size. `undefined` or empty string → default 3.
- * Anything else must parse to a positive integer; non-integer, non-numeric,
- * zero, and negative values throw `WorkerPoolConfigValidationError` so the
- * boot site can log + exit non-zero (PRD §10).
+ * returns the resolved pool size. `undefined` or empty string →
+ * `DEFAULT_WORKER_POOL_SIZE` (1). Anything else must parse to a positive
+ * integer; non-integer, non-numeric, zero, and negative values throw
+ * `WorkerPoolConfigValidationError` so the boot site can log + exit non-zero
+ * (PRD §10).
  */
 export function resolveWorkerPoolSize(
     rawValue: string | undefined,
