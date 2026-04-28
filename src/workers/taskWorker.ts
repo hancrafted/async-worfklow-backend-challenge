@@ -128,3 +128,85 @@ export async function taskWorker(): Promise<void> {
         stopSignal,
     });
 }
+
+/** Default in-process worker pool size when WORKER_POOL_SIZE is unset. */
+export const DEFAULT_WORKER_POOL_SIZE = 3;
+
+export enum WorkerPoolConfigError {
+    INVALID_POOL_SIZE = 'INVALID_POOL_SIZE',
+}
+
+/**
+ * Boot-time validation error for worker pool configuration. Carries the
+ * structured `code` so the boot site can log a discriminator-friendly
+ * `error.code` field next to the human message.
+ */
+export class WorkerPoolConfigValidationError extends Error {
+    public readonly code: WorkerPoolConfigError;
+
+    constructor(code: WorkerPoolConfigError, message: string) {
+        super(message);
+        this.name = 'WorkerPoolConfigValidationError';
+        this.code = code;
+    }
+}
+
+/**
+ * Parses the `WORKER_POOL_SIZE` env value (raw string from `process.env`) and
+ * returns the resolved pool size. `undefined` or empty string → default 3.
+ * Anything else must parse to a positive integer; non-integer, non-numeric,
+ * zero, and negative values throw `WorkerPoolConfigValidationError` so the
+ * boot site can log + exit non-zero (PRD §10).
+ */
+export function resolveWorkerPoolSize(
+    rawValue: string | undefined,
+    defaultSize: number = DEFAULT_WORKER_POOL_SIZE,
+): number {
+    if (rawValue === undefined || rawValue === '') return defaultSize;
+    const parsed = Number(rawValue);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new WorkerPoolConfigValidationError(
+            WorkerPoolConfigError.INVALID_POOL_SIZE,
+            `WORKER_POOL_SIZE must be a positive integer, received: '${rawValue}'`,
+        );
+    }
+    return parsed;
+}
+
+export interface StartWorkerPoolOptions {
+    size: number;
+    repository: Repository<Task>;
+    sleepMs: number;
+    sleepFn?: SleepFn;
+    stopSignal: StopSignal;
+}
+
+/**
+ * Spawns `size` `runWorkerLoop(...)` coroutines that share the same
+ * Repository and the same `StopSignal` (PRD §10 / US17, US18). Returns a
+ * promise that resolves once every coroutine has exited the loop. Pool size
+ * is re-validated here so the in-process call site (tests, alternate boot
+ * paths) gets the same fail-fast behaviour as the env path.
+ */
+export function startWorkerPool(
+    options: StartWorkerPoolOptions,
+): Promise<void[]> {
+    if (!Number.isInteger(options.size) || options.size <= 0) {
+        throw new WorkerPoolConfigValidationError(
+            WorkerPoolConfigError.INVALID_POOL_SIZE,
+            `worker pool size must be a positive integer, received: ${String(options.size)}`,
+        );
+    }
+    const coroutines: Promise<void>[] = [];
+    for (let workerIndex = 0; workerIndex < options.size; workerIndex++) {
+        coroutines.push(
+            runWorkerLoop({
+                tickFn: () => tickOnce(options.repository),
+                sleepMs: options.sleepMs,
+                sleepFn: options.sleepFn,
+                stopSignal: options.stopSignal,
+            }),
+        );
+    }
+    return Promise.all(coroutines);
+}
