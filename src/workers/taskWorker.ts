@@ -1,4 +1,4 @@
-import type { Repository } from 'typeorm';
+import type { DataSource, Repository } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import { Task } from '../models/Task';
 import { Workflow, WorkflowStatus } from '../models/Workflow';
@@ -132,20 +132,19 @@ export async function taskWorker(): Promise<void> {
 /**
  * Default in-process worker pool size when WORKER_POOL_SIZE is unset.
  *
- * Pinned to 1 because the production runtime shares one `AppDataSource`
- * (= one SQLite connection) across every worker coroutine, and TypeORM's
- * `manager.transaction(...)` cannot interleave `BEGIN`/`SAVEPOINT`/`COMMIT`
- * boundaries on a shared connection — concurrent calls trip
- * `SQLITE_ERROR: no such savepoint`. This is the same substrate limitation
- * the integration tests work around with a per-pool mutex
- * (`tests/03-interdependent-tasks/helpers/drainPool.ts`). Lifted by Issue
- * #17 (per-worker DataSources); raise the default back to N>1 once that
- * lands. See `interview/design_decisions.md` §Task 7.
+ * Issue #17 landed per-worker DataSources + WAL on the production path
+ * (`buildWorkerDataSource` opens its own SQLite connection per coroutine
+ * with `journal_mode=WAL` and a `busyTimeout`), so the shared-connection
+ * concurrency ceiling that previously pinned this at 1 is gone. 3 matches
+ * the original Task 3c Wave 3 rationale — enough concurrency to demonstrate
+ * the atomic-claim race without forcing operators to set the env. See
+ * `interview/design_decisions.md` Issue #17 entry.
  */
-export const DEFAULT_WORKER_POOL_SIZE = 1;
+export const DEFAULT_WORKER_POOL_SIZE = 3;
 
 export enum WorkerPoolConfigError {
     INVALID_POOL_SIZE = 'INVALID_POOL_SIZE',
+    INVALID_POOL_SOURCE = 'INVALID_POOL_SOURCE',
 }
 
 /**
@@ -166,7 +165,7 @@ export class WorkerPoolConfigValidationError extends Error {
 /**
  * Parses the `WORKER_POOL_SIZE` env value (raw string from `process.env`) and
  * returns the resolved pool size. `undefined` or empty string →
- * `DEFAULT_WORKER_POOL_SIZE` (1). Anything else must parse to a positive
+ * `DEFAULT_WORKER_POOL_SIZE` (3). Anything else must parse to a positive
  * integer; non-integer, non-numeric, zero, and negative values throw
  * `WorkerPoolConfigValidationError` so the boot site can log + exit non-zero
  * (PRD §10).
@@ -186,40 +185,104 @@ export function resolveWorkerPoolSize(
     return parsed;
 }
 
+export type DataSourceFactory = () => DataSource;
+
 export interface StartWorkerPoolOptions {
     size: number;
-    repository: Repository<Task>;
+    /**
+     * Production path (Issue #17 Wave 1): each coroutine creates its own
+     * un-initialized `DataSource` via this factory, initializes it, and
+     * destroys it on loop exit. Per-worker DataSources prevent the
+     * shared-connection corruption that surfaced as `TransactionNotStartedError`
+     * when concurrent `manager.transaction(...)` calls interleaved on a single
+     * connection.
+     */
+    dataSourceFactory?: DataSourceFactory;
+    /**
+     * Legacy in-memory test substrate path: every coroutine shares one
+     * Repository (and thus one DataSource). Mutually exclusive with
+     * `dataSourceFactory`.
+     */
+    repository?: Repository<Task>;
     sleepMs: number;
     sleepFn?: SleepFn;
     stopSignal: StopSignal;
 }
 
 /**
- * Spawns `size` `runWorkerLoop(...)` coroutines that share the same
- * Repository and the same `StopSignal` (PRD §10 / US17, US18). Returns a
- * promise that resolves once every coroutine has exited the loop. Pool size
- * is re-validated here so the in-process call site (tests, alternate boot
- * paths) gets the same fail-fast behaviour as the env path.
+ * Spawns `size` `runWorkerLoop(...)` coroutines that share a `StopSignal`
+ * (PRD §10 / US17, US18). Each coroutine runs against either a per-worker
+ * `DataSource` (production path, via `dataSourceFactory`) or a shared
+ * `Repository` (legacy in-memory test substrate). Pool size is re-validated
+ * here so the in-process call site (tests, alternate boot paths) gets the
+ * same fail-fast behaviour as the env path.
  */
 export function startWorkerPool(
     options: StartWorkerPoolOptions,
 ): Promise<void[]> {
-    if (!Number.isInteger(options.size) || options.size <= 0) {
-        throw new WorkerPoolConfigValidationError(
-            WorkerPoolConfigError.INVALID_POOL_SIZE,
-            `worker pool size must be a positive integer, received: ${String(options.size)}`,
-        );
+    const validationError = validateStartWorkerPoolOptions(options);
+    if (validationError) {
+        throw new WorkerPoolConfigValidationError(validationError, formatStartWorkerPoolError(validationError, options));
     }
     const coroutines: Promise<void>[] = [];
     for (let workerIndex = 0; workerIndex < options.size; workerIndex++) {
-        coroutines.push(
-            runWorkerLoop({
-                tickFn: () => tickOnce(options.repository),
+        coroutines.push(spawnWorkerCoroutine(options));
+    }
+    return Promise.all(coroutines);
+}
+
+function validateStartWorkerPoolOptions(
+    options: StartWorkerPoolOptions,
+): WorkerPoolConfigError | null {
+    if (!Number.isInteger(options.size) || options.size <= 0) {
+        return WorkerPoolConfigError.INVALID_POOL_SIZE;
+    }
+    const hasFactory = options.dataSourceFactory !== undefined;
+    const hasRepository = options.repository !== undefined;
+    if (hasFactory === hasRepository) {
+        return WorkerPoolConfigError.INVALID_POOL_SOURCE;
+    }
+    return null;
+}
+
+function formatStartWorkerPoolError(
+    code: WorkerPoolConfigError,
+    options: StartWorkerPoolOptions,
+): string {
+    if (code === WorkerPoolConfigError.INVALID_POOL_SIZE) {
+        return `worker pool size must be a positive integer, received: ${String(options.size)}`;
+    }
+    return 'startWorkerPool requires exactly one of `dataSourceFactory` or `repository`';
+}
+
+/**
+ * One worker coroutine. Production path: factory mints a fresh DataSource,
+ * the coroutine initializes it, runs the loop, and destroys it on exit.
+ * Legacy path: re-uses the caller-supplied shared repository directly.
+ */
+async function spawnWorkerCoroutine(
+    options: StartWorkerPoolOptions,
+): Promise<void> {
+    if (options.dataSourceFactory) {
+        const dataSource = options.dataSourceFactory();
+        await dataSource.initialize();
+        try {
+            const repository = dataSource.getRepository(Task);
+            await runWorkerLoop({
+                tickFn: () => tickOnce(repository),
                 sleepMs: options.sleepMs,
                 sleepFn: options.sleepFn,
                 stopSignal: options.stopSignal,
-            }),
-        );
+            });
+        } finally {
+            if (dataSource.isInitialized) await dataSource.destroy();
+        }
+        return;
     }
-    return Promise.all(coroutines);
+    await runWorkerLoop({
+        tickFn: () => tickOnce(options.repository as Repository<Task>),
+        sleepMs: options.sleepMs,
+        sleepFn: options.sleepFn,
+        stopSignal: options.stopSignal,
+    });
 }

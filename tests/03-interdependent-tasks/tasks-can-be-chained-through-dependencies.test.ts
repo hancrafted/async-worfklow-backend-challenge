@@ -1,5 +1,7 @@
 import "reflect-metadata";
 import path from "path";
+import * as os from "os";
+import * as fs from "fs";
 import express from "express";
 import request from "supertest";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -16,8 +18,39 @@ import { createAnalysisRouter } from "../../src/routes/analysisRoutes";
 import { ApiErrorCode } from "../../src/utils/errorResponse";
 import { LogLevel } from "../../src/utils/logger";
 import { PolygonAreaJob } from "../../src/jobs/PolygonAreaJob";
+import { buildAppDataSource, buildWorkerDataSource } from "../../src/data-source";
 import { seedWorkflow } from "./helpers/seedWorkflow";
 import { drainPool } from "./helpers/drainPool";
+
+interface PoolSubstrate {
+  bootstrapDataSource: DataSource;
+  dataSourceFactory: () => DataSource;
+  cleanup: () => Promise<void>;
+}
+
+// Issue #17 Wave 2 — pool tests now exercise per-worker DataSources against a
+// file-backed SQLite (WAL on, 5s busy_timeout) so concurrent
+// `manager.transaction(...)` calls actually overlap on the substrate. The
+// drainPool helper mints its own DataSources via this factory.
+async function buildPoolSubstrate(): Promise<PoolSubstrate> {
+  const dbDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "drainpool-"));
+  const dbPath = path.join(dbDirectory, "database.sqlite");
+  const bootstrapDataSource = buildAppDataSource({
+    databasePath: dbPath,
+    dropSchema: true,
+  });
+  await bootstrapDataSource.initialize();
+  return {
+    bootstrapDataSource,
+    dataSourceFactory: () => buildWorkerDataSource(dbPath),
+    cleanup: async () => {
+      if (bootstrapDataSource.isInitialized) await bootstrapDataSource.destroy();
+      if (fs.existsSync(dbDirectory)) {
+        fs.rmSync(dbDirectory, { recursive: true, force: true });
+      }
+    },
+  };
+}
 
 const VALID_GEOJSON = {
   type: "Polygon",
@@ -438,20 +471,20 @@ describe("R3 — runner: runner-level exceptions are transient (US21)", () => {
 
 
 // PRD §10 / US17, US18 — Wave 3 worker pool. The `drainPool` helper drives
-// N `runWorkerLoop(...)` coroutines synchronously over the real repository.
+// N `runWorkerLoop(...)` coroutines synchronously, each owning its own
+// per-worker `DataSource` (Issue #17 Wave 1 + Wave 2 — substrate de-mutex).
 describe("R3 — pool: atomic claim race, N workers, 1 queued task, no double-execution (US17, US18)", () => {
-  let dataSource: DataSource;
+  let substrate: PoolSubstrate;
 
   beforeEach(async () => {
-    dataSource = buildDataSource();
-    await dataSource.initialize();
+    substrate = await buildPoolSubstrate();
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    if (dataSource.isInitialized) await dataSource.destroy();
+    await substrate.cleanup();
   });
 
   describe("happy path: N=3 workers, 1 queued task, exactly one execution", () => {
@@ -463,7 +496,7 @@ describe("R3 — pool: atomic claim race, N workers, 1 queued task, no double-ex
       // three coroutines race for the same row.
       const runSpy = vi.spyOn(PolygonAreaJob.prototype, "run");
       const { workflow, tasks } = await seedWorkflow(
-        dataSource,
+        substrate.bootstrapDataSource,
         "three-step-mixed-deps.yml",
         { clientId: "pool-happy" },
       );
@@ -472,8 +505,10 @@ describe("R3 — pool: atomic claim race, N workers, 1 queued task, no double-ex
       const queuedAtStart = tasks.filter((t) => t.status === TaskStatus.Queued);
       expect(queuedAtStart).toHaveLength(1);
 
-      const executed = await drainPool(dataSource.getRepository(Task), {
+      const executed = await drainPool({
         workerCount: 3,
+        dataSourceFactory: substrate.dataSourceFactory,
+        bootstrapDataSource: substrate.bootstrapDataSource,
       });
 
       // The first claimer wins → polygonArea ran once → the two losers see
@@ -482,40 +517,53 @@ describe("R3 — pool: atomic claim race, N workers, 1 queued task, no double-ex
       // executed counts cumulative ticks across all coroutines: polygonArea
       // (1) + analysis (2 deps satisfied via promotion) + notification (3) = 3.
       expect(executed).toBe(3);
-      const refreshed = await dataSource.getRepository(Workflow).findOneOrFail({
-        where: { workflowId: workflow.workflowId },
-      });
+      const refreshed = await substrate.bootstrapDataSource
+        .getRepository(Workflow)
+        .findOneOrFail({ where: { workflowId: workflow.workflowId } });
       expect(refreshed.status).toBe(WorkflowStatus.Completed);
     });
   });
 
   describe("error path: a transient claim error in one worker does not double-execute", () => {
     it("a single failed claim transaction in one worker still leaves exactly one execution", async () => {
-      // Seed first (seedWorkflow itself uses a transaction). Then stub
-      // `manager.transaction` to throw on its NEXT call only — that
-      // simulates a transient DB blip in one of the racing workers' claim
-      // transactions. The other workers must still atomically claim the row,
-      // and the spy job must observe exactly one execution.
+      // Seed first (seedWorkflow itself uses a transaction). Install a
+      // one-shot rejection on the FIRST per-worker DataSource the factory
+      // mints — simulates a transient DB blip in that worker's first claim
+      // transaction. The other workers (with their own DataSources) must
+      // still atomically claim the row, and the spy job must observe exactly
+      // one execution.
       const runSpy = vi.spyOn(PolygonAreaJob.prototype, "run");
       const { workflow } = await seedWorkflow(
-        dataSource,
+        substrate.bootstrapDataSource,
         "three-step-mixed-deps.yml",
         { clientId: "pool-error" },
       );
-      const transactionSpy = vi.spyOn(dataSource.manager, "transaction");
-      transactionSpy.mockRejectedValueOnce(
-        new Error("transient claim blip"),
-      );
 
-      await drainPool(dataSource.getRepository(Task), { workerCount: 3 });
+      let factoryCallCount = 0;
+      const wrappedFactory = (): DataSource => {
+        const dataSource = substrate.dataSourceFactory();
+        factoryCallCount += 1;
+        if (factoryCallCount === 1) {
+          vi.spyOn(dataSource.manager, "transaction").mockRejectedValueOnce(
+            new Error("transient claim blip"),
+          );
+        }
+        return dataSource;
+      };
+
+      await drainPool({
+        workerCount: 3,
+        dataSourceFactory: wrappedFactory,
+        bootstrapDataSource: substrate.bootstrapDataSource,
+      });
 
       // Even with one transient claim failure, the polygonArea step ran once
       // and the workflow eventually completes (the surviving workers drain
       // every promoted step). No double execution.
       expect(runSpy).toHaveBeenCalledTimes(1);
-      const refreshed = await dataSource.getRepository(Workflow).findOneOrFail({
-        where: { workflowId: workflow.workflowId },
-      });
+      const refreshed = await substrate.bootstrapDataSource
+        .getRepository(Workflow)
+        .findOneOrFail({ where: { workflowId: workflow.workflowId } });
       expect(refreshed.status).toBe(WorkflowStatus.Completed);
     });
   });
@@ -524,18 +572,17 @@ describe("R3 — pool: atomic claim race, N workers, 1 queued task, no double-ex
 // US20 — per-worker isolation. A single failing job in one workflow must not
 // stop the pool or the other workflows from reaching a terminal state.
 describe("R3 — pool: per-worker isolation (US20 reinforced)", () => {
-  let dataSource: DataSource;
+  let substrate: PoolSubstrate;
 
   beforeEach(async () => {
-    dataSource = buildDataSource();
-    await dataSource.initialize();
+    substrate = await buildPoolSubstrate();
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    if (dataSource.isInitialized) await dataSource.destroy();
+    await substrate.cleanup();
   });
 
   describe("happy path: independent workflows reach terminal states under N=3", () => {
@@ -546,20 +593,24 @@ describe("R3 — pool: per-worker isolation (US20 reinforced)", () => {
       // status — Completed for the two valid ones, Failed for the invalid one
       // (fail-fast sweep flips its dependent steps to Skipped). The pool
       // must keep draining throughout — no worker dies on the failing step.
-      const goodA = await seedWorkflow(dataSource, "three-step-mixed-deps.yml", {
+      const goodA = await seedWorkflow(substrate.bootstrapDataSource, "three-step-mixed-deps.yml", {
         clientId: "iso-good-a",
       });
-      const badB = await seedWorkflow(dataSource, "three-step-mixed-deps.yml", {
+      const badB = await seedWorkflow(substrate.bootstrapDataSource, "three-step-mixed-deps.yml", {
         clientId: "iso-bad-b",
         geoJson: { type: "Point", coordinates: [0, 0] },
       });
-      const goodC = await seedWorkflow(dataSource, "three-step-mixed-deps.yml", {
+      const goodC = await seedWorkflow(substrate.bootstrapDataSource, "three-step-mixed-deps.yml", {
         clientId: "iso-good-c",
       });
 
-      await drainPool(dataSource.getRepository(Task), { workerCount: 3 });
+      await drainPool({
+        workerCount: 3,
+        dataSourceFactory: substrate.dataSourceFactory,
+        bootstrapDataSource: substrate.bootstrapDataSource,
+      });
 
-      const workflowRepository = dataSource.getRepository(Workflow);
+      const workflowRepository = substrate.bootstrapDataSource.getRepository(Workflow);
       const refreshedA = await workflowRepository.findOneOrFail({
         where: { workflowId: goodA.workflow.workflowId },
       });
@@ -577,30 +628,39 @@ describe("R3 — pool: per-worker isolation (US20 reinforced)", () => {
 
   describe("error path: a hard runner-level error in one tick does not poison sibling workflows", () => {
     it("a transient claim error during one tick is logged and the pool continues draining other workflows", async () => {
-      // Seed two workflows first (seedWorkflow itself uses transactions),
-      // then inject a one-shot rejection on `manager.transaction` to simulate
-      // a DB blip during one worker's claim. The loop's try/catch (PRD §11 /
-      // US21) must absorb the throw, sleepFn (no-op here) returns, and on
-      // the next iteration both workflows still drain to Completed.
+      // Seed two workflows first. Install a one-shot rejection on the FIRST
+      // per-worker DataSource the factory mints — simulates a DB blip during
+      // that worker's first claim. The loop's try/catch (PRD §11 / US21) must
+      // absorb the throw, sleepFn returns, and the next iteration drains.
       // Per-worker isolation == one worker's transient error does not poison
       // the others.
-      const wfA = await seedWorkflow(dataSource, "three-step-mixed-deps.yml", {
+      const wfA = await seedWorkflow(substrate.bootstrapDataSource, "three-step-mixed-deps.yml", {
         clientId: "iso-blip-a",
       });
-      const wfB = await seedWorkflow(dataSource, "three-step-mixed-deps.yml", {
+      const wfB = await seedWorkflow(substrate.bootstrapDataSource, "three-step-mixed-deps.yml", {
         clientId: "iso-blip-b",
       });
-      const transactionSpy = vi.spyOn(dataSource.manager, "transaction");
-      transactionSpy.mockRejectedValueOnce(
-        new Error("transient claim blip in pool"),
-      );
 
-      await drainPool(dataSource.getRepository(Task), {
+      let factoryCallCount = 0;
+      const wrappedFactory = (): DataSource => {
+        const dataSource = substrate.dataSourceFactory();
+        factoryCallCount += 1;
+        if (factoryCallCount === 1) {
+          vi.spyOn(dataSource.manager, "transaction").mockRejectedValueOnce(
+            new Error("transient claim blip in pool"),
+          );
+        }
+        return dataSource;
+      };
+
+      await drainPool({
         workerCount: 3,
+        dataSourceFactory: wrappedFactory,
+        bootstrapDataSource: substrate.bootstrapDataSource,
         maxTicksPerWorker: 100,
       });
 
-      const workflowRepository = dataSource.getRepository(Workflow);
+      const workflowRepository = substrate.bootstrapDataSource.getRepository(Workflow);
       const refreshedA = await workflowRepository.findOneOrFail({
         where: { workflowId: wfA.workflow.workflowId },
       });
