@@ -189,11 +189,12 @@ describe("TaskRunner — workflow lifecycle (PRD §Decision 8 + §9, Wave 1)", (
   });
 
   describe("error path — failure does not prematurely mark the workflow Failed", () => {
-    it("keeps the workflow non-terminal when a failure leaves a sibling still queued", async () => {
-      // Wave 1 has no fail-fast sweep yet (Wave 3). With one failed task and
-      // one still queued, allTerminal === false → workflow must stay
-      // non-terminal. This covers the bug where the legacy lifecycle code
-      // skipped the workflow update entirely on the throw path.
+    it("closes the workflow Failed when a failure leaves a sibling still queued (Wave 3 sweep)", async () => {
+      // Wave 3 fail-fast sweep flips the queued sibling to Skipped in the
+      // same post-task transaction; the lifecycle eval then sees allTerminal
+      // && anyFailed and writes workflow.status = Failed. Regression guard
+      // for the legacy bug where the lifecycle update sat outside the catch
+      // block (failure-on-first-task left the workflow stuck at in_progress).
       getJobMock.mockReturnValue({
         run: () => Promise.reject(new Error("boom")),
       });
@@ -205,8 +206,11 @@ describe("TaskRunner — workflow lifecycle (PRD §Decision 8 + §9, Wave 1)", (
       const after = await dataSource.getRepository(Workflow).findOneOrFail({
         where: { workflowId: workflow.workflowId },
       });
-      expect(after.status).not.toBe(WorkflowStatus.Failed);
-      expect(after.status).not.toBe(WorkflowStatus.Completed);
+      expect(after.status).toBe(WorkflowStatus.Failed);
+      const refreshedSibling = await dataSource.getRepository(Task).findOneOrFail({
+        where: { taskId: tasks[1].taskId },
+      });
+      expect(refreshedSibling.status).toBe(TaskStatus.Skipped);
     });
 
     it("marks the workflow Failed when the LAST terminal transition is a failure", async () => {
@@ -313,10 +317,11 @@ describe("TaskRunner — Wave 2 readiness promotion (waiting → queued)", () =>
       expect(refreshedChild.status).toBe(TaskStatus.Queued);
     });
 
-    it("does NOT promote when the parent transition is Failed", async () => {
-      // Promotion is gated on outcome.status === Completed (PRD §Decision 9).
-      // A failing parent must leave the child in waiting — fail-fast sweep is
-      // Wave 3's responsibility, not promotion's.
+    it("does NOT promote when the parent transition is Failed (Wave 3 sweeps to Skipped instead)", async () => {
+      // Promotion is gated on outcome.status === Completed (PRD §Decision 9):
+      // a failing parent must NOT promote the child to Queued. Wave 3's
+      // fail-fast sweep flips the waiter to Skipped instead — proving in one
+      // shot that promotion did not fire AND that sweep handled the failure.
       getJobMock.mockReturnValue({
         run: () => Promise.reject(new Error("boom")),
       });
@@ -328,7 +333,7 @@ describe("TaskRunner — Wave 2 readiness promotion (waiting → queued)", () =>
       const refreshedChild = await dataSource
         .getRepository(Task)
         .findOneOrFail({ where: { taskId: child.taskId } });
-      expect(refreshedChild.status).toBe(TaskStatus.Waiting);
+      expect(refreshedChild.status).toBe(TaskStatus.Skipped);
     });
   });
 
@@ -561,6 +566,159 @@ describe("TaskRunner — Wave 2 dependency envelope builder", () => {
         .getRepository(Task)
         .findOneOrFail({ where: { taskId: child.taskId } });
       expect(refreshedChild.status).toBe(TaskStatus.Failed);
+    });
+  });
+});
+
+describe("TaskRunner — Wave 3 fail-fast sweep (PRD §Decision 2)", () => {
+  let dataSource: DataSource;
+
+  beforeEach(async () => {
+    dataSource = buildDataSource();
+    await dataSource.initialize();
+    getJobMock.mockReset();
+  });
+
+  afterEach(async () => {
+    if (dataSource.isInitialized) await dataSource.destroy();
+  });
+
+  describe("happy path — sweep flips both Waiting and Queued siblings to Skipped on Failed", () => {
+    it("sweeps every Waiting and Queued sibling when the parent transition is Failed", async () => {
+      // Seed parent (queued) + sibling A (waiting, depends on parent) +
+      // sibling B (queued, no deps). When the parent fails, the sweep must
+      // flip BOTH siblings to skipped — not just the dep-linked waiter — and
+      // the workflow must transition to Failed.
+      const workflowRepository = dataSource.getRepository(Workflow);
+      const taskRepository = dataSource.getRepository(Task);
+      const workflow = await workflowRepository.save(
+        Object.assign(new Workflow(), {
+          clientId: "c1",
+          status: WorkflowStatus.Initial,
+        }),
+      );
+      const parent = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.Queued,
+          taskType: "polygonArea", stepNumber: 1, dependsOn: [], workflow,
+        }),
+      );
+      const waitingSibling = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.Waiting,
+          taskType: "analysis", stepNumber: 2, dependsOn: [parent.taskId], workflow,
+        }),
+      );
+      const queuedSibling = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.Queued,
+          taskType: "notification", stepNumber: 3, dependsOn: [], workflow,
+        }),
+      );
+
+      getJobMock.mockReturnValue({
+        run: () => Promise.reject(new Error("boom")),
+      });
+      const runner = new TaskRunner(taskRepository);
+      await expect(runner.run(parent)).rejects.toThrow(/boom/);
+
+      const refreshedWaiting = await taskRepository.findOneOrFail({
+        where: { taskId: waitingSibling.taskId },
+      });
+      const refreshedQueued = await taskRepository.findOneOrFail({
+        where: { taskId: queuedSibling.taskId },
+      });
+      expect(refreshedWaiting.status).toBe(TaskStatus.Skipped);
+      expect(refreshedQueued.status).toBe(TaskStatus.Skipped);
+
+      const refreshedWorkflow = await workflowRepository.findOneOrFail({
+        where: { workflowId: workflow.workflowId },
+      });
+      expect(refreshedWorkflow.status).toBe(WorkflowStatus.Failed);
+    });
+  });
+
+  describe("error path — sweep is gated and respects in_progress siblings", () => {
+    it("does NOT sweep when the parent transition is Completed (sweep gates on Failed only)", async () => {
+      // Symmetric with promotion's "only on Completed" rule. Seed parent
+      // (queued) + sibling (queued, no deps). Parent succeeds → sweep must
+      // NOT fire; the sibling stays Queued and the workflow stays
+      // non-terminal (sibling is still queued).
+      const workflowRepository = dataSource.getRepository(Workflow);
+      const taskRepository = dataSource.getRepository(Task);
+      const workflow = await workflowRepository.save(
+        Object.assign(new Workflow(), {
+          clientId: "c1",
+          status: WorkflowStatus.Initial,
+        }),
+      );
+      const parent = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.Queued,
+          taskType: "polygonArea", stepNumber: 1, dependsOn: [], workflow,
+        }),
+      );
+      const sibling = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.Queued,
+          taskType: "polygonArea", stepNumber: 2, dependsOn: [], workflow,
+        }),
+      );
+
+      getJobMock.mockReturnValue({ run: () => Promise.resolve({ ok: true }) });
+      const runner = new TaskRunner(taskRepository);
+      await runner.run(parent);
+
+      const refreshedSibling = await taskRepository.findOneOrFail({
+        where: { taskId: sibling.taskId },
+      });
+      expect(refreshedSibling.status).toBe(TaskStatus.Queued);
+    });
+
+    it("leaves in_progress siblings untouched when the parent transition is Failed", async () => {
+      // Seed parent (queued) + an in_progress sibling (simulating a worker
+      // pool where another worker is mid-job). Parent fails. The sweep must
+      // NOT touch the in_progress sibling (PRD non-goal: no cancellation of
+      // in-flight jobs). The workflow stays non-terminal until the in_progress
+      // sibling lands and re-fires the lifecycle eval.
+      const workflowRepository = dataSource.getRepository(Workflow);
+      const taskRepository = dataSource.getRepository(Task);
+      const workflow = await workflowRepository.save(
+        Object.assign(new Workflow(), {
+          clientId: "c1",
+          status: WorkflowStatus.InProgress,
+        }),
+      );
+      const parent = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.Queued,
+          taskType: "polygonArea", stepNumber: 1, dependsOn: [], workflow,
+        }),
+      );
+      const inProgressSibling = await taskRepository.save(
+        Object.assign(new Task(), {
+          clientId: "c1", geoJson: "{}", status: TaskStatus.InProgress,
+          taskType: "polygonArea", stepNumber: 2, dependsOn: [], workflow,
+        }),
+      );
+
+      getJobMock.mockReturnValue({
+        run: () => Promise.reject(new Error("boom")),
+      });
+      const runner = new TaskRunner(taskRepository);
+      await expect(runner.run(parent)).rejects.toThrow(/boom/);
+
+      const refreshedSibling = await taskRepository.findOneOrFail({
+        where: { taskId: inProgressSibling.taskId },
+      });
+      expect(refreshedSibling.status).toBe(TaskStatus.InProgress);
+
+      const refreshedWorkflow = await workflowRepository.findOneOrFail({
+        where: { workflowId: workflow.workflowId },
+      });
+      // allTerminal=false because the in_progress sibling is non-terminal;
+      // workflow stays in_progress until the sibling lands.
+      expect(refreshedWorkflow.status).toBe(WorkflowStatus.InProgress);
     });
   });
 });

@@ -17,8 +17,6 @@ const VALID_POLYGON = JSON.stringify({
   coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
 });
 
-const FIXTURE = path.join(__dirname, "fixtures", "polygonArea_only.yml");
-
 const makeTask = (geoJson: string): Task =>
   ({
     taskId: "task-under-test",
@@ -162,38 +160,47 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
       );
     }
 
-    it("a malformed task fails with a structured Result.error and the next queued task still completes", async () => {
-      // Creates a 2-task workflow from the fixture, mutates the first task's
-      // geoJson to malformed input, drains the worker, then asserts: task[0]
-      // is Failed with a structured error AND task[1] is still Completed with
-      // valid Result.data — the worker-isolation contract (US2, US20).
+    it("a malformed task in one workflow fails with a structured Result.error and a queued task in a separate workflow still completes", async () => {
+      // Worker isolation (US2, US20): the worker loop must survive a single
+      // task failure. Under Wave 3 fail-fast (PRD §Decision 2), any failure
+      // in a workflow sweeps that workflow's other waiting/queued siblings to
+      // skipped — so the "next queued task still completes" assertion has to
+      // live in a SEPARATE workflow. We seed two single-step workflows: WF1's
+      // task is malformed (will fail), WF2's task is valid (must still
+      // complete). Drains the worker and asserts both side effects.
       const factory = new WorkflowFactory(dataSource);
-      const workflow = await factory.createWorkflowFromYAML(
-        FIXTURE,
-        "client-mixed",
+      const failingWorkflow = await factory.createWorkflowFromYAML(
+        path.join(__dirname, "fixtures", "polygonArea_single.yml"),
+        "client-failing",
+        VALID_POLYGON,
+      );
+      const successWorkflow = await factory.createWorkflowFromYAML(
+        path.join(__dirname, "fixtures", "polygonArea_single.yml"),
+        "client-success",
         VALID_POLYGON,
       );
 
       const taskRepository = dataSource.getRepository(Task);
-      const tasks = await taskRepository.find({
-        where: { workflow: { workflowId: workflow.workflowId } },
-        order: { stepNumber: "ASC" },
+      const failingTasks = await taskRepository.find({
+        where: { workflow: { workflowId: failingWorkflow.workflowId } },
       });
-      tasks[0].geoJson = "not-json{";
-      await taskRepository.save(tasks[0]);
+      failingTasks[0].geoJson = "not-json{";
+      await taskRepository.save(failingTasks[0]);
 
       await drainWorker();
 
-      const refreshed = await taskRepository.find({
-        where: { workflow: { workflowId: workflow.workflowId } },
-        order: { stepNumber: "ASC" },
+      const refreshedFailing = await taskRepository.findOneOrFail({
+        where: { workflow: { workflowId: failingWorkflow.workflowId } },
       });
-      expect(refreshed[0].status).toBe(TaskStatus.Failed);
-      expect(refreshed[1].status).toBe(TaskStatus.Completed);
+      const refreshedSuccess = await taskRepository.findOneOrFail({
+        where: { workflow: { workflowId: successWorkflow.workflowId } },
+      });
+      expect(refreshedFailing.status).toBe(TaskStatus.Failed);
+      expect(refreshedSuccess.status).toBe(TaskStatus.Completed);
 
       const resultRepository = dataSource.getRepository(Result);
       const failedResult = await resultRepository.findOneOrFail({
-        where: { resultId: refreshed[0].resultId },
+        where: { resultId: refreshedFailing.resultId },
       });
       expect(failedResult.data).toBeNull();
       expect(failedResult.error).toBeTruthy();
@@ -207,7 +214,7 @@ describe("Readme §1 R2 — handles invalid GeoJSON gracefully and marks the tas
       expect(parsedError.stack.split("\n").length).toBeLessThanOrEqual(10);
 
       const successResult = await resultRepository.findOneOrFail({
-        where: { resultId: refreshed[1].resultId },
+        where: { resultId: refreshedSuccess.resultId },
       });
       expect(successResult.error).toBeNull();
       const parsedSuccess = JSON.parse(successResult.data!) as {

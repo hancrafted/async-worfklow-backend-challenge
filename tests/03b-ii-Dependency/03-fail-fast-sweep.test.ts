@@ -7,13 +7,12 @@ import { Result } from "../../src/models/Result";
 import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
 import { TaskStatus } from "../../src/workers/taskRunner";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
-import type { Job, JobContext } from "../../src/jobs/Job";
+import type { Job } from "../../src/jobs/Job";
 import { drainWorker } from "../03-interdependent-tasks/helpers/drainWorker";
 import type * as MockJobsByTypeModule from "../03-interdependent-tasks/helpers/mockJobsByType";
 
-// Reuse the shared mockJobsByType helper (same hoisted-require dance as
-// 01-lifecycle-claim-bump.test.ts) so the JobFactory mock instance is the
-// one `setMockJobsByType` writes to.
+// Reuse the shared mockJobsByType helper (same hoisted-require dance as the
+// other Wave files in this folder).
 const mockJobsHelper = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("../03-interdependent-tasks/helpers/mockJobsByType.ts") as typeof MockJobsByTypeModule;
@@ -48,7 +47,16 @@ async function seedTwoStepChain(dataSource: DataSource): Promise<Workflow> {
   );
 }
 
-describe("Task 3b-ii Wave 2 — promotion + dependency envelope (integration)", () => {
+async function seedThreeStepFanOut(dataSource: DataSource): Promise<Workflow> {
+  const factory = new WorkflowFactory(dataSource);
+  return factory.createWorkflowFromYAML(
+    fixturePath("three-step-fan-out.yml"),
+    "test-client",
+    JSON.stringify(VALID_GEOJSON),
+  );
+}
+
+describe("Task 3b-ii Wave 3 — fail-fast sweep + workflow.failed (integration)", () => {
   let dataSource: DataSource;
 
   beforeEach(async () => {
@@ -62,64 +70,11 @@ describe("Task 3b-ii Wave 2 — promotion + dependency envelope (integration)", 
   });
 
   describe("happy path", () => {
-    it("runs a 2-step dependsOn chain end-to-end and forwards step 1's output to step 2 via context.dependencies", async () => {
-      // Spy jobs:
-      //   - step 1 (polygonArea) returns a known output payload.
-      //   - step 2 (analysis) records the JobContext it receives so the test
-      //     can assert envelope shape, sort, and dependency.output fidelity.
-      const stepOneOutput = { areaSqMeters: 1234567 };
-      const capturedContexts: JobContext[] = [];
-      const polygonAreaJob: Job = {
-        run: () => Promise.resolve(stepOneOutput),
-      };
-      const analysisJob: Job = {
-        run: (context) => {
-          capturedContexts.push(context);
-          return Promise.resolve({ analysed: true });
-        },
-      };
-      setMockJobsByType({ polygonArea: polygonAreaJob, analysis: analysisJob });
-
-      const workflow = await seedTwoStepChain(dataSource);
-      const taskRepository = dataSource.getRepository(Task);
-      const ranCount = await drainWorker(taskRepository);
-
-      expect(ranCount).toBe(2);
-      const terminalWorkflow = await dataSource.getRepository(Workflow).findOneOrFail({
-        where: { workflowId: workflow.workflowId },
-      });
-      expect(terminalWorkflow.status).toBe(WorkflowStatus.Completed);
-
-      const tasks = await taskRepository.find({
-        where: { workflowId: workflow.workflowId },
-        order: { stepNumber: "ASC" },
-      });
-      expect(tasks.map((t) => t.status)).toEqual([
-        TaskStatus.Completed,
-        TaskStatus.Completed,
-      ]);
-
-      // Envelope assertions: step 2 received exactly one dependency entry,
-      // sourced from step 1's persisted Result.data, with the documented shape.
-      expect(capturedContexts).toHaveLength(1);
-      const stepTwoContext = capturedContexts[0];
-      expect(stepTwoContext.dependencies).toHaveLength(1);
-      const dep = stepTwoContext.dependencies[0];
-      expect(dep.stepNumber).toBe(1);
-      expect(dep.taskType).toBe("polygonArea");
-      expect(dep.taskId).toBe(tasks[0].taskId);
-      expect(dep.output).toEqual(stepOneOutput);
-    });
-  });
-
-  describe("error path", () => {
-    it("when step 1 fails, promotion does not fire — step 2 is swept to Skipped and the workflow ends Failed", async () => {
-      // Promotion only fires on Completed transitions (PRD §Decision 9).
-      // A failing step 1 must leave step 2 unpromoted; Wave 3's fail-fast
-      // sweep then flips step 2 (waiting) to skipped in the same post-task
-      // transaction, and the lifecycle eval closes the workflow as Failed.
-      // The minimum guarantee Wave 2 must hold is: step 2's job is never
-      // invoked — Wave 3 also asserts the surrounding sweep + workflow state.
+    it("when step 1 fails the runner sweeps step 2 to skipped and ends the workflow Failed", async () => {
+      // Two-step chain (step 2 dependsOn [1]). Step 1's job throws, so the
+      // runner's post-task transaction enters the Failed branch: sweep flips
+      // step 2 (waiting) to skipped, lifecycle eval then sees allTerminal +
+      // anyFailed and writes workflow.status = Failed in the same txn.
       const stepTwoCalls: number[] = [];
       const failingPolygonArea: Job = {
         run: () => Promise.reject(new Error("boom-step-1")),
@@ -139,8 +94,8 @@ describe("Task 3b-ii Wave 2 — promotion + dependency envelope (integration)", 
       const taskRepository = dataSource.getRepository(Task);
       const ranCount = await drainWorker(taskRepository);
 
-      // Only step 1 is ever queued; drainWorker returns after step 1 fails
-      // because step 2 has been swept to Skipped (no promotion on Failed).
+      // Only step 1 is ever queued; step 2 is swept to skipped (terminal) so
+      // the worker drains after one tick — step 2's job is never invoked.
       expect(ranCount).toBe(1);
       expect(stepTwoCalls).toHaveLength(0);
 
@@ -148,8 +103,56 @@ describe("Task 3b-ii Wave 2 — promotion + dependency envelope (integration)", 
         where: { workflowId: workflow.workflowId },
         order: { stepNumber: "ASC" },
       });
-      expect(tasks[0].status).toBe(TaskStatus.Failed);
-      expect(tasks[1].status).toBe(TaskStatus.Skipped);
+      expect(tasks.map((t) => t.status)).toEqual([
+        TaskStatus.Failed,
+        TaskStatus.Skipped,
+      ]);
+
+      const workflowAfter = await dataSource.getRepository(Workflow).findOneOrFail({
+        where: { workflowId: workflow.workflowId },
+      });
+      expect(workflowAfter.status).toBe(WorkflowStatus.Failed);
+    });
+  });
+
+  describe("error path", () => {
+    it("fan-out: every waiting sibling is swept when the shared parent fails", async () => {
+      // Fan-out fixture: step 1 (polygonArea) is the queued root; steps 2 and
+      // 3 each depend on step 1 (waiting). Step 1's job throws → sweep flips
+      // BOTH step 2 and step 3 to skipped in a single UPDATE; workflow ends
+      // Failed.
+      const downstreamCalls: string[] = [];
+      const failingPolygonArea: Job = {
+        run: () => Promise.reject(new Error("boom-fanout")),
+      };
+      const recordingJob: Job = {
+        run: ({ task }) => {
+          downstreamCalls.push(task.taskType);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      setMockJobsByType({
+        polygonArea: failingPolygonArea,
+        analysis: recordingJob,
+        notification: recordingJob,
+      });
+
+      const workflow = await seedThreeStepFanOut(dataSource);
+      const taskRepository = dataSource.getRepository(Task);
+      const ranCount = await drainWorker(taskRepository);
+
+      expect(ranCount).toBe(1);
+      expect(downstreamCalls).toHaveLength(0);
+
+      const tasks = await taskRepository.find({
+        where: { workflowId: workflow.workflowId },
+        order: { stepNumber: "ASC" },
+      });
+      expect(tasks.map((t) => t.status)).toEqual([
+        TaskStatus.Failed,
+        TaskStatus.Skipped,
+        TaskStatus.Skipped,
+      ]);
 
       const workflowAfter = await dataSource.getRepository(Workflow).findOneOrFail({
         where: { workflowId: workflow.workflowId },

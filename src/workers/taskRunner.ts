@@ -51,6 +51,8 @@ export class TaskRunner {
             if (!workflow) return;
             if (outcome.status === TaskStatus.Completed) {
                 await this.promoteReadyTasks(entityManager, workflow);
+            } else if (outcome.status === TaskStatus.Failed) {
+                await this.sweepFailedSiblings(entityManager, workflow);
             }
             await this.evaluateWorkflowLifecycle(entityManager, workflow);
         });
@@ -180,6 +182,34 @@ export class TaskRunner {
                 { taskId: waiter.taskId, status: TaskStatus.Waiting },
                 { status: TaskStatus.Queued },
             );
+        }
+    }
+
+    /**
+     * PRD §Decision 2 — fail-fast sweep. When a task transitions to Failed,
+     * every sibling whose status is `waiting` or `queued` is flipped to
+     * `skipped` in a single guarded UPDATE. `in_progress` siblings are NOT
+     * touched (PRD non-goal: no cancellation of in-flight jobs) — they run to
+     * completion and their terminal write re-triggers the lifecycle eval,
+     * which then closes the workflow as Failed. The in-memory snapshot is
+     * mirrored so the lifecycle eval that runs next in the same transaction
+     * observes the swept tasks as terminal.
+     */
+    private async sweepFailedSiblings(
+        entityManager: EntityManager,
+        workflow: Workflow,
+    ): Promise<void> {
+        await entityManager.getRepository(Task).update(
+            {
+                workflowId: workflow.workflowId,
+                status: In([TaskStatus.Waiting, TaskStatus.Queued]),
+            },
+            { status: TaskStatus.Skipped },
+        );
+        for (const sibling of workflow.tasks) {
+            if (sibling.status === TaskStatus.Waiting || sibling.status === TaskStatus.Queued) {
+                sibling.status = TaskStatus.Skipped;
+            }
         }
     }
 
