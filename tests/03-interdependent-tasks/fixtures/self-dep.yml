@@ -1,0 +1,5 @@
+name: "self_dep"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+    dependsOn: [1]

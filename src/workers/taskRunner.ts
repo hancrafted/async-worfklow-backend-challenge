@@ -8,9 +8,11 @@ import { serializeJobError } from '../utils/serializeJobError';
 
 export enum TaskStatus {
     Queued = 'queued',
+    Waiting = 'waiting',
     InProgress = 'in_progress',
     Completed = 'completed',
-    Failed = 'failed'
+    Failed = 'failed',
+    Skipped = 'skipped'
 }
 
 export class TaskRunner {

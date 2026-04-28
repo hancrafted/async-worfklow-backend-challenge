@@ -12,11 +12,9 @@ const legacySrcFiles = [
   "src/jobs/EmailNotificationJob.ts",
   "src/jobs/Job.ts",
   "src/jobs/JobFactory.ts",
-  "src/routes/analysisRoutes.ts",
   "src/routes/defaultRoute.ts",
   "src/workers/taskRunner.ts",
   "src/workers/taskWorker.ts",
-  "src/workflows/WorkflowFactory.ts",
 ];
 
 module.exports = tseslint.config(
