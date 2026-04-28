@@ -198,16 +198,17 @@ The system runs a configurable pool of N concurrent workers within the same Node
 - `failureReason` is present **only** on `failed` tasks; the only value under fail-fast is `job_error`. `skipped` tasks need no reason — the status itself is the explanation.
 - No payloads (`output`, `error.message`) are returned here — `/status` is for progress tracking, not data retrieval.
 
-`GET /workflow/:id/results` — lenient terminal policy:
+`GET /workflow/:id/results` — strict-completion policy (literal Readme §Task 6, supersedes the original lenient terminal policy — see [#22](https://github.com/hancrafted/async-worfklow-backend-challenge/issues/22)):
 
-- `200` for any **terminal** workflow (`completed` or `failed`). Body wraps the framework-synthesized `finalResult` (decision 8):
+- `200` for `completed` workflows. Body wraps the framework-synthesized `finalResult` (decision 8):
   ```json
-  { "workflowId": "uuid", "status": "failed", "finalResult": { /* see decision 8 */ } }
+  { "workflowId": "uuid", "status": "completed", "finalResult": { /* see decision 8 */ } }
   ```
-- `400` only for non-terminal workflows (`initial` / `in_progress`), with `{ "error": "WORKFLOW_NOT_TERMINAL", "message": "..." }`.
+- `400 { "error": "WORKFLOW_FAILED", "message": "..." }` for `failed` workflows (Readme §Task 6: *"Return a 400 response if the workflow is not yet completed."*). Failure detail surfaces via `GET /workflow/:id/status` under per-task `failureReason`.
+- `400 { "error": "WORKFLOW_NOT_TERMINAL", "message": "..." }` for non-terminal workflows (`initial` / `in_progress`).
 - `404` if the workflow id does not exist.
-- **Lazy patch:** if a terminal workflow has `finalResult IS NULL`, the handler computes and persists it before returning (see decision 8). The handler never advances workflow lifecycle.
-- **Reasoning for lenient terminal:** terminal means terminal. Hiding a meaningful `finalResult` (with `failedAtStep` and per-task error info) behind a 400 just because some tasks failed wastes work and gives a worse caller experience. Recorded in `interview/design_decisions.md` against Task 6.
+- **Lazy patch:** runs only on the `completed` branch. If a `completed` workflow has `finalResult IS NULL`, the handler computes and persists it before returning (see decision 8). The handler never advances workflow lifecycle on any branch.
+- **History:** the original lenient terminal policy (`200` for both `completed` and `failed`) is documented and superseded in `interview/design_decisions.md` against Task 6.
 
 **No list endpoint.** `GET /workflow` is **not** implemented. Out of scope; reviewers have workflow IDs from their `POST /analysis` responses.
 
