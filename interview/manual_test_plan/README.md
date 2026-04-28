@@ -10,6 +10,7 @@ to the index below — do **not** append sections to this README.
 | --- | --- |
 | §Task 0 — Test Harness & Quality Gates | [`00_test-harness-and-quality-gates.md`](./00_test-harness-and-quality-gates.md) |
 | §Task 1 — PolygonAreaJob | [`01_polygon-area-job.md`](./01_polygon-area-job.md) |
+| §Task 2 — ReportGenerationJob | [`02_report-generation-job.md`](./02_report-generation-job.md) |
 | §Task 3a — Workflow YAML `dependsOn` parsing, validation, transactional creation | [`03a_workflow-yaml-dependson-parsing-and-validation.md`](./03a_workflow-yaml-dependson-parsing-and-validation.md) |
 | §Task 3b-i — Migrate `Job.run` to the `JobContext` signature | [`03b-i_migrate-job-run-to-jobcontext.md`](./03b-i_migrate-job-run-to-jobcontext.md) |
 | §Pre-#7 — Worker infrastructure prelude | [`pre-7a_worker-infrastructure-prelude.md`](./pre-7a_worker-infrastructure-prelude.md) |

@@ -16,7 +16,12 @@ export interface ValidationFinding {
   message: string;
 }
 
-const KNOWN_TASK_TYPES = new Set(["analysis", "notification", "polygonArea"]);
+const KNOWN_TASK_TYPES = new Set([
+  "analysis",
+  "notification",
+  "polygonArea",
+  "reportGeneration",
+]);
 
 /**
  * Tarjan-style DFS cycle finder. Returns the closing path
