@@ -51,10 +51,12 @@ Tier C — pure rename, no mutation cycle.
 | outputs-area-in-square-meters.test.ts | polygon-area.test.ts (`describe("happy")`) | src/jobs/PolygonAreaJob.ts: `area(geometry)` → `0` (return constant) | ✅ | ✅ | ✅ |
 | handles-invalid-geojson-gracefully.test.ts | polygon-area.test.ts (`describe("error")`) | src/jobs/PolygonAreaJob.ts: validation `throw` guard removed (validate result discarded) | ✅ | ✅ | ✅ |
 
-## Phase 4
+## Phase 4 — §2 report-generation
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| report-generation.test.ts (`describe("happy path: report aggregates upstream outputs")`) | report-generation.test.ts (`describe("happy path: report aggregates upstream outputs")`) | src/jobs/ReportGenerationJob.ts: `tasks: tasks` → `tasks: []` (drop aggregated entries from response) | ✅ | ✅ | ✅ |
+| report-generation.test.ts (`describe("error path: defensive handling of malformed upstream envelopes")`) | report-generation.test.ts (`describe("error path: defensive handling of malformed upstream envelopes")`) | src/workers/taskRunner.ts: `JSON.parse(result.data)` wrapped in try/catch returning `null` (swallow corruption) | ✅ | ✅ | ✅ |
 
 ## Phase 5
 
