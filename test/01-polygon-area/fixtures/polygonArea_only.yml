@@ -1,0 +1,6 @@
+name: "polygonArea_only"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "polygonArea"
+    stepNumber: 2

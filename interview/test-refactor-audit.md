@@ -44,10 +44,12 @@ copy's equivalence via `diff` byte-identity.
 
 Tier C — pure rename, no mutation cycle.
 
-## Phase 3
+## Phase 3 — §1 polygon-area
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| outputs-area-in-square-meters.test.ts | polygon-area.test.ts (`describe("happy")`) | src/jobs/PolygonAreaJob.ts: `area(geometry)` → `0` (return constant) | ✅ | ✅ | ✅ |
+| handles-invalid-geojson-gracefully.test.ts | polygon-area.test.ts (`describe("error")`) | src/jobs/PolygonAreaJob.ts: validation `throw` guard removed (validate result discarded) | ✅ | ✅ | ✅ |
 
 ## Phase 4
 
