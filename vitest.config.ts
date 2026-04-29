@@ -3,7 +3,7 @@ import swc from "unplugin-swc";
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
   },
   // Vitest's default esbuild transform does not emit `design:type` decorator

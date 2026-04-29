@@ -5,6 +5,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "*.config.ts", "*.config.js"],
+  "include": ["src", "tests", "test", "*.config.ts", "*.config.js"],
   "exclude": ["node_modules", "dist"]
 }

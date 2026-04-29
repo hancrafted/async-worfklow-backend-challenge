@@ -86,7 +86,7 @@ module.exports = tseslint.config(
     },
   },
   {
-    files: ["tests/**", "**/*.test.ts", "**/*.spec.ts"],
+    files: ["tests/**", "test/**", "**/*.test.ts", "**/*.spec.ts"],
     rules: {
       complexity: "off",
       "max-lines-per-function": "off",
