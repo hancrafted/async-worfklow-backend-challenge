@@ -5,7 +5,19 @@
     "test": "vitest run",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit -p tsconfig.eslint.json",
-    "prepare": "husky"
+    "prepare": "husky",
+    "manual-test:all": "for s in interview/manual_test_plan/0*.sh; do bash \"$s\" || echo BROKEN; done",
+    "manual-test:01-polygon-area:happy": "bash interview/manual_test_plan/01_polygon-area_happy.sh",
+    "manual-test:01-polygon-area:sad": "bash interview/manual_test_plan/01_polygon-area_sad.sh",
+    "manual-test:02-report-generation:happy": "bash interview/manual_test_plan/02_report-generation_happy.sh",
+    "manual-test:02-report-generation:sad": "bash interview/manual_test_plan/02_report-generation_sad.sh",
+    "manual-test:03a-workflow-yaml-dependson:happy": "bash interview/manual_test_plan/03a_workflow-yaml-dependson_happy.sh",
+    "manual-test:04-workflow-final-result:happy": "bash interview/manual_test_plan/04_workflow-final-result_happy.sh",
+    "manual-test:04-workflow-final-result:sad": "bash interview/manual_test_plan/04_workflow-final-result_sad.sh",
+    "manual-test:05-workflow-status:happy": "bash interview/manual_test_plan/05_workflow-status_happy.sh",
+    "manual-test:05-workflow-status:sad": "bash interview/manual_test_plan/05_workflow-status_sad.sh",
+    "manual-test:06-workflow-results:happy": "bash interview/manual_test_plan/06_workflow-results_happy.sh",
+    "manual-test:06-workflow-results:sad": "bash interview/manual_test_plan/06_workflow-results_sad.sh"
   },
   "dependencies": {
     "@turf/turf": "^7.1.0",
