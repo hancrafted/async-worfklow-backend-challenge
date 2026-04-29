@@ -82,10 +82,12 @@ Tier C — pure rename, no mutation cycle.
 | workflow-status.test.ts (`describe("happy path: status returns workflow + per-task list keyed by stepNumber")`) | workflow-status.test.ts (`describe("happy path: status returns workflow + per-task list keyed by stepNumber")`) | src/routes/workflowRoutes.ts: `completedTasks = tasks.filter(... === Completed).length` → `completedTasks = 0` | ✅ | ✅ | ✅ |
 | workflow-status.test.ts (`describe("error path: workflow not found")`) | workflow-status.test.ts (`describe("error path: workflow not found")`) | src/routes/workflowRoutes.ts: status-handler 404 → 500 in the `if (!workflow)` `errorResponse(...)` call | ✅ | ✅ | ✅ |
 
-## Phase 8
+## Phase 8 — §6 workflow-results
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| workflow-results.test.ts (`describe("happy path: terminal workflows return finalResult")`) | workflow-results.test.ts (`describe("happy path: terminal workflows return finalResult")`) | src/routes/workflowRoutes.ts: `/results` 200 response `finalResult` → `{ ...finalResult, tasks: [] }` (drop synthesized task entries) | ✅ | ✅ | ✅ |
+| workflow-results.test.ts (`describe("error path: workflow failed")`) | workflow-results.test.ts (`describe("error path: workflow failed")`) | src/routes/workflowRoutes.ts: `WORKFLOW_FAILED` `errorResponse(...)` 400 → 500 | ✅ | ✅ | ✅ |
 
 ## Phase 9
 
