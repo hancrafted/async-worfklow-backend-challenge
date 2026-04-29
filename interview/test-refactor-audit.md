@@ -75,10 +75,12 @@ Tier C — pure rename, no mutation cycle.
 | final-result.test.ts (`describe("happy path: completed workflow gets framework-synthesized finalResult")`) | final-result.test.ts (`describe("happy path: completed workflow gets framework-synthesized finalResult")`) | src/workflows/synthesizeFinalResult.ts: `entry.output = parseOutputOrNull(result)` → result discarded (assignment dropped) | ✅ | ✅ | ✅ |
 | final-result.test.ts (`describe("error path: mixed-failure workflow surfaces failedAtStep and per-task errors")`) | final-result.test.ts (`describe("error path: mixed-failure workflow surfaces failedAtStep and per-task errors")`) | src/workflows/synthesizeFinalResult.ts: `if (failedSteps.length > 0) payload.failedAtStep = Math.min(...failedSteps)` removed | ✅ | ✅ | ✅ |
 
-## Phase 7
+## Phase 7 — §5 workflow-status
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| workflow-status.test.ts (`describe("happy path: status returns workflow + per-task list keyed by stepNumber")`) | workflow-status.test.ts (`describe("happy path: status returns workflow + per-task list keyed by stepNumber")`) | src/routes/workflowRoutes.ts: `completedTasks = tasks.filter(... === Completed).length` → `completedTasks = 0` | ✅ | ✅ | ✅ |
+| workflow-status.test.ts (`describe("error path: workflow not found")`) | workflow-status.test.ts (`describe("error path: workflow not found")`) | src/routes/workflowRoutes.ts: status-handler 404 → 500 in the `if (!workflow)` `errorResponse(...)` call | ✅ | ✅ | ✅ |
 
 ## Phase 8
 
