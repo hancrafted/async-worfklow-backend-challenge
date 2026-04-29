@@ -1,4 +1,4 @@
-export const MAX_STACK_LINES = 10;
+import { truncateStack } from './truncateStack';
 
 export enum JobErrorReason {
     JobError = 'job_error',
@@ -18,6 +18,6 @@ export interface SerializedJobError {
 export function serializeJobError(error: unknown): SerializedJobError {
     const message = error instanceof Error ? error.message : String(error);
     const rawStack = error instanceof Error && error.stack ? error.stack : '';
-    const stack = rawStack.split('\n').slice(0, MAX_STACK_LINES).join('\n');
+    const stack = truncateStack(rawStack);
     return { message, reason: JobErrorReason.JobError, stack };
 }
