@@ -29,7 +29,8 @@ assert_jq "initial workflowId matches" "$INITIAL_BODY" '.workflowId' "$WORKFLOW_
 assert_jq "initial totalTasks is 24" "$INITIAL_BODY" '.totalTasks' "24"
 
 # Wait until terminal and re-check.
-FINAL_STATUS=$(wait_terminal "$WORKFLOW_ID" 120)
+watch_workflow "$WORKFLOW_ID" 120
+FINAL_STATUS="$WATCH_WORKFLOW_STATUS"
 assert_eq "workflow reached completed" "$FINAL_STATUS" "completed"
 
 FINAL_BODY=$(curl -sS "$BASE_URL/workflow/$WORKFLOW_ID/status")

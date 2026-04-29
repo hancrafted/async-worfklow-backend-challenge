@@ -16,7 +16,8 @@ if [ -z "$WORKFLOW_ID" ]; then
 fi
 echo "WorkflowId: $WORKFLOW_ID"
 
-FINAL_STATUS=$(wait_terminal "$WORKFLOW_ID" 90)
+watch_workflow "$WORKFLOW_ID" 90
+FINAL_STATUS="$WATCH_WORKFLOW_STATUS"
 assert_eq "workflow reached completed" "$FINAL_STATUS" "completed"
 
 dump_workflow "$WORKFLOW_ID"

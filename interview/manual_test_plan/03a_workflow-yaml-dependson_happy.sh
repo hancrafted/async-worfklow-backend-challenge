@@ -18,7 +18,8 @@ if [ -z "$WORKFLOW_ID" ]; then
 fi
 echo "WorkflowId: $WORKFLOW_ID"
 
-FINAL_STATUS=$(wait_terminal "$WORKFLOW_ID" 120)
+watch_workflow "$WORKFLOW_ID" 120
+FINAL_STATUS="$WATCH_WORKFLOW_STATUS"
 assert_eq "workflow reached completed (full DAG executed)" "$FINAL_STATUS" "completed"
 
 STATUS_BODY=$(curl -sS "$BASE_URL/workflow/$WORKFLOW_ID/status")
