@@ -45,10 +45,17 @@ the rationale file for why.
 
 All scripts source [`_lib.sh`](./_lib.sh) for the shared assertion and
 fixture helpers (`require_server`, `post_analysis`, `wait_terminal`,
-`assert_eq`, `assert_jq`, `assert_http_status`, `assert_sqlite_eq`,
-`summarize`, plus the `VALID_POLYGON` / `INVALID_POLYGON` fixtures). The
-helpers are the single point where curl/sqlite/jq plumbing lives — the
-per-task scripts read like test cases, not test plumbing.
+`watch_workflow`, `assert_eq`, `assert_jq`, `assert_http_status`,
+`assert_sqlite_eq`, `summarize`, plus the `VALID_POLYGON` /
+`INVALID_POLYGON` fixtures). The helpers are the single point where
+curl/sqlite/jq plumbing lives — the per-task scripts read like test
+cases, not test plumbing.
+
+Reviewers who want to ad-hoc tail any workflow can also call
+`watch_workflow <workflowId> [timeoutSec]` directly: in an interactive
+terminal it renders the 1-second live progress view used by
+`02_report-generation_happy.sh`; in a pipe / batch context it degrades
+to silent polling and just echoes the final terminal status.
 
 ## Archived predecessors
 

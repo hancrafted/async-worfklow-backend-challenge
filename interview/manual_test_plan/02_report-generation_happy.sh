@@ -17,7 +17,12 @@ if [ -z "$WORKFLOW_ID" ]; then
 fi
 echo "WorkflowId: $WORKFLOW_ID"
 
-FINAL_STATUS=$(wait_terminal "$WORKFLOW_ID" 120)
+# watch_workflow renders a live 1s tick to the terminal in TTY mode and
+# falls back to wait_terminal in batch/pipe contexts; we read status from
+# the WATCH_WORKFLOW_STATUS side-channel so the live tick stays visible
+# (a `$(...)` capture would force [ -t 1 ] false and silence the tick).
+watch_workflow "$WORKFLOW_ID" 120
+FINAL_STATUS="$WATCH_WORKFLOW_STATUS"
 assert_eq "workflow reached completed" "$FINAL_STATUS" "completed"
 
 # Four reportGeneration tasks (steps 21,22,23 lane reports + 24 final aggregation).

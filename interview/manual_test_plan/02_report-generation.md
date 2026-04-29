@@ -19,6 +19,16 @@ In the 24-step example DAG the requirement is exercised by **four**
 its own lane's `[polygonArea, analysis]`) and the final aggregation step
 24, which depends on `[21, 22, 23]`.
 
+## Live progress view
+
+Because the 24-step DAG is the longest-running case in the manual plan,
+`02_report-generation_happy.sh` uses the `watch_workflow` helper from
+`_lib.sh` to render a 1-second live progress view in interactive
+terminals — every tick clears the screen and prints the per-task status
+table. In a batch loop (or any non-TTY context) the same helper falls
+back to silent polling, so the script remains greppable for `[PASS]` /
+`[FAIL]` evidence with no screen-clearing noise.
+
 ## What the happy script proves
 
 `02_report-generation_happy.sh` runs the full DAG and asserts:

@@ -53,6 +53,51 @@ wait_terminal() {
   return 1
 }
 
+# Live-tails a workflow's tasks every 1s in interactive terminals, falling
+# back to silent polling (wait_terminal semantics) outside a TTY so the
+# 11-script batch loop stays free of clear codes / per-tick noise.
+# Echoes the final terminal status (completed|failed|timeout) on stdout —
+# same contract as wait_terminal, so callers can substitute either helper
+# via $(...). Also exports WATCH_WORKFLOW_STATUS for callers that want the
+# live tick visible (i.e. invoke without $() capture, since [ -t 1 ] is
+# always false inside command substitution).
+watch_workflow() {
+  local workflowId="$1"
+  local timeoutSec="${2:-120}"
+  WATCH_WORKFLOW_STATUS=""
+  if [ ! -t 1 ]; then
+    local s
+    s=$(wait_terminal "$workflowId" "$timeoutSec")
+    local rc=$?
+    WATCH_WORKFLOW_STATUS="$s"
+    echo "$s"
+    return $rc
+  fi
+  local elapsed=0
+  local status=""
+  while [ "$elapsed" -lt "$timeoutSec" ]; do
+    status=$(curl -sS "$BASE_URL/workflow/$workflowId/status" | jq -r '.status // empty')
+    clear
+    echo "Workflow: $workflowId  elapsed=${elapsed}s  status=${status:-unknown}"
+    sqlite3 -header -column "$DATABASE_PATH" \
+      "SELECT t.stepNumber, t.taskType, t.status, r.error \
+       FROM tasks t LEFT JOIN results r ON r.resultId = t.resultId \
+       WHERE t.workflowId='$workflowId' ORDER BY t.stepNumber;"
+    if [ "$status" = "completed" ] || [ "$status" = "failed" ]; then
+      echo "watch_workflow: $workflowId -> $status in ${elapsed}s"
+      WATCH_WORKFLOW_STATUS="$status"
+      echo "$status"
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  echo "watch_workflow: $workflowId -> timeout in ${elapsed}s"
+  WATCH_WORKFLOW_STATUS="timeout"
+  echo "timeout"
+  return 1
+}
+
 # Pretty-prints the workflow's tasks straight from sqlite for evidence.
 dump_workflow() {
   local workflowId="$1"
