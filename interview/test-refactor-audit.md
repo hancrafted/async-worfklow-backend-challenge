@@ -68,10 +68,12 @@ Tier C — pure rename, no mutation cycle.
 | 03b-ii-Dependency/02-promotion-envelope.test.ts (`describe("happy path")`) | promotion-envelope.test.ts (`describe("happy path")`) | src/workers/taskRunner.ts: `promoteReadyTasks` `completedTaskIds` replaced with empty `Set<string>()` — promotion never fires | ✅ (`ranCount` = 1, expected 2) | ✅ (`ranCount` = 1, expected 2) | ✅ |
 | 03b-ii-Dependency/03-fail-fast-sweep.test.ts (`describe("happy path")`, `describe("error path")`) | fail-fast-sweep.test.ts (`describe("happy path")`, `describe("error path")`) | src/workers/taskRunner.ts: `sweepFailedSiblings` body removed (UPDATE + in-memory mirror both gone) | ✅ (siblings stay `waiting`) | ✅ (siblings stay `waiting`) | ✅ |
 
-## Phase 6
+## Phase 6 — §4 final-result
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| final-result.test.ts (`describe("happy path: completed workflow gets framework-synthesized finalResult")`) | final-result.test.ts (`describe("happy path: completed workflow gets framework-synthesized finalResult")`) | src/workflows/synthesizeFinalResult.ts: `entry.output = parseOutputOrNull(result)` → result discarded (assignment dropped) | ✅ | ✅ | ✅ |
+| final-result.test.ts (`describe("error path: mixed-failure workflow surfaces failedAtStep and per-task errors")`) | final-result.test.ts (`describe("error path: mixed-failure workflow surfaces failedAtStep and per-task errors")`) | src/workflows/synthesizeFinalResult.ts: `if (failedSteps.length > 0) payload.failedAtStep = Math.min(...failedSteps)` removed | ✅ | ✅ | ✅ |
 
 ## Phase 7
 
