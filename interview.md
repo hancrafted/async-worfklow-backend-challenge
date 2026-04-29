@@ -46,7 +46,7 @@ an in-process worker pool with per-worker SQLite DataSources:
 ### 2.1 Planning timeline
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Readme.md] -->|grill| B[plan/PRD.md]
     B -->|to-issues skill| C[GitHub Issues 1-22]
     C -->|per ticket| D[CLAUDE.md rules]
@@ -144,6 +144,16 @@ The verification surface lives in `interview/manual_test_plan/`:
   `$WORKFLOW_ID` and filters every SQL/HTTP assertion by it. Sad scripts
   that mutate the DB revert via `trap EXIT`. No global counts; scripts
   run in any order against a shared server.
+
+**Running the scripts via npm.** Each shell script is wired as an npm
+script for convenience:
+
+- `npm run manual-test:all` — run every happy + sad script sequentially.
+- `npm run manual-test:NN-<name>:happy` / `:sad` — run one script. For
+  example: `npm run manual-test:01-polygon-area:happy`.
+
+Direct `bash interview/manual_test_plan/<script>.sh` invocation also
+works. See `package.json` `scripts` for the full list.
 
 | README req | Rationale | Happy | Sad | What it asserts |
 |---|---|---|---|---|
