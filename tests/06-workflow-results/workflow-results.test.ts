@@ -12,12 +12,12 @@ import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 import { createWorkflowRouter } from "../../src/routes/workflowRoutes";
 import { ApiErrorCode } from "../../src/utils/errorResponse";
 import type { Job } from "../../src/jobs/Job";
-import { drainWorker } from "../03-interdependent-tasks/helpers/drainWorker";
-import type * as MockJobsByTypeModule from "../03-interdependent-tasks/helpers/mockJobsByType";
+import { drainWorker } from "../_setup/helpers/drainWorker";
+import type * as MockJobsByTypeModule from "../_setup/helpers/mockJobsByType";
 
 const mockJobsHelper = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("../03-interdependent-tasks/helpers/mockJobsByType.ts") as typeof MockJobsByTypeModule;
+  return require("../_setup/helpers/mockJobsByType.ts") as typeof MockJobsByTypeModule;
 });
 vi.mock("../../src/jobs/JobFactory", mockJobsHelper.jobFactoryMockImpl);
 const { setMockJobsByType } = mockJobsHelper;

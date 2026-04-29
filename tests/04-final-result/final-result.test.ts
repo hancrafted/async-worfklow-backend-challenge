@@ -9,14 +9,14 @@ import { TaskStatus } from "../../src/models/Task";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 import type { Job } from "../../src/jobs/Job";
 import { JobErrorReason } from "../../src/utils/serializeJobError";
-import { drainWorker } from "../03-interdependent-tasks/helpers/drainWorker";
-import type * as MockJobsByTypeModule from "../03-interdependent-tasks/helpers/mockJobsByType";
+import { drainWorker } from "../_setup/helpers/drainWorker";
+import type * as MockJobsByTypeModule from "../_setup/helpers/mockJobsByType";
 
 // Reuse the shared mockJobsByType helper (same hoisted-require pattern as the
 // Wave-3 sweep test). Each test wires its own per-task-type job map.
 const mockJobsHelper = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("../03-interdependent-tasks/helpers/mockJobsByType.ts") as typeof MockJobsByTypeModule;
+  return require("../_setup/helpers/mockJobsByType.ts") as typeof MockJobsByTypeModule;
 });
 vi.mock("../../src/jobs/JobFactory", mockJobsHelper.jobFactoryMockImpl);
 const { setMockJobsByType } = mockJobsHelper;

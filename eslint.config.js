@@ -23,6 +23,7 @@ module.exports = tseslint.config(
       "src/data/**",
       "public/**",
       ".husky/**",
+      "interview/archive/**",
       ...legacySrcFiles,
     ],
   },
@@ -86,7 +87,7 @@ module.exports = tseslint.config(
     },
   },
   {
-    files: ["tests/**", "test/**", "**/*.test.ts", "**/*.spec.ts"],
+    files: ["tests/**", "**/*.test.ts", "**/*.spec.ts"],
     rules: {
       complexity: "off",
       "max-lines-per-function": "off",

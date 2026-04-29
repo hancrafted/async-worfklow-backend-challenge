@@ -16,8 +16,8 @@ import { ApiErrorCode } from "../../src/utils/errorResponse";
 import { LogLevel } from "../../src/utils/logger";
 import { PolygonAreaJob } from "../../src/jobs/PolygonAreaJob";
 import { buildAppDataSource, buildWorkerDataSource } from "../../src/data-source";
-import { seedWorkflow } from "./helpers/seedWorkflow";
-import { drainPool } from "./helpers/drainPool";
+import { seedWorkflow } from "../_setup/helpers/seedWorkflow";
+import { drainPool } from "../_setup/helpers/drainPool";
 
 interface PoolSubstrate {
   bootstrapDataSource: DataSource;
@@ -310,6 +310,8 @@ describe("R3 — runner: structured JSON-line logging (US22)", () => {
       });
     });
   });
+
+
 
   describe("error path: error JSON line with serialized error.stack on a job exception", () => {
     it("emits a 'job failed' error line with truncated stack when polygonArea throws", async () => {

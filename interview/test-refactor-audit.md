@@ -110,3 +110,5 @@ via `git diff tests/`).
 ## Phase 10
 
 Cutover only — archive + rename + config revert. No mutation cycles.
+
+Cutover ran: old `/tests/` archived to `/interview/archive/tests/` (preserving git history via `git mv`), `/test/` renamed to `/tests/`, dual-include reverted in `vitest.config.ts` / `tsconfig.eslint.json` / `eslint.config.js`, and `interview/archive/**` excluded from all three tools (eslint, typecheck, vitest).
