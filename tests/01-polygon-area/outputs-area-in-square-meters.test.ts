@@ -7,7 +7,8 @@ import { getJobForTaskType } from "../../src/jobs/JobFactory";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow } from "../../src/models/Workflow";
-import { TaskRunner, TaskStatus } from "../../src/workers/taskRunner";
+import { TaskRunner } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 
 const VALID_POLYGON = JSON.stringify({

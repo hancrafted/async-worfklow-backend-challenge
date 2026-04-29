@@ -8,12 +8,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DataSource } from "typeorm";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
-import { Workflow } from "../../src/models/Workflow";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
+import { TaskStatus } from "../../src/models/Task";
 import { tickOnce, runWorkerLoop, type StopSignal } from "../../src/workers/taskWorker";
-import {
-  WorkflowStatus,
-} from "../../src/workflows/WorkflowFactory";
 import { createAnalysisRouter } from "../../src/routes/analysisRoutes";
 import { ApiErrorCode } from "../../src/utils/errorResponse";
 import { LogLevel } from "../../src/utils/logger";

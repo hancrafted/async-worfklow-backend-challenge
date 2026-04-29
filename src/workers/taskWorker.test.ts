@@ -13,11 +13,10 @@ import {
   WorkerPoolConfigValidationError,
   type StopSignal,
 } from "./taskWorker";
-import { TaskStatus } from "./taskRunner";
-import { Task } from "../models/Task";
+import { Task, TaskStatus } from "../models/Task";
 import { Result } from "../models/Result";
 import { Workflow } from "../models/Workflow";
-import { WorkflowStatus } from "../workflows/WorkflowFactory";
+import { WorkflowStatus } from "../models/Workflow";
 import { LogLevel } from "../utils/logger";
 import type { Job } from "../jobs/Job";
 import { buildAppDataSource, buildWorkerDataSource } from "../data-source";

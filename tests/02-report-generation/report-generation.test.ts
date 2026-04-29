@@ -5,7 +5,7 @@ import { DataSource } from "typeorm";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 import { tickOnce } from "../../src/workers/taskWorker";
 import { drainWorker } from "../03-interdependent-tasks/helpers/drainWorker";

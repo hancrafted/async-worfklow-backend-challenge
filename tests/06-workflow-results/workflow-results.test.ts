@@ -7,7 +7,7 @@ import { DataSource, IsNull } from "typeorm";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 import { createWorkflowRouter } from "../../src/routes/workflowRoutes";
 import { ApiErrorCode } from "../../src/utils/errorResponse";

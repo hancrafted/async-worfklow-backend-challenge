@@ -5,7 +5,7 @@ import { DataSource } from "typeorm";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 import type { Job } from "../../src/jobs/Job";
 import { JobErrorReason } from "../../src/utils/serializeJobError";

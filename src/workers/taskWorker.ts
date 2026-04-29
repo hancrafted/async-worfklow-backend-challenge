@@ -1,7 +1,8 @@
 import type { DataSource, Repository } from 'typeorm';
 import { Task } from '../models/Task';
 import { Workflow, WorkflowStatus } from '../models/Workflow';
-import { TaskRunner, TaskStatus } from './taskRunner';
+import { TaskRunner } from './taskRunner';
+import { TaskStatus } from '../models/Task';
 import * as logger from '../utils/logger';
 
 /**

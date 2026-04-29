@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Task } from "../../src/models/Task";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import { translateDependsOnToStepNumbers } from "../../src/routes/workflowRoutes";
 
 // Builds a Task fixture with the minimum fields the translator reads

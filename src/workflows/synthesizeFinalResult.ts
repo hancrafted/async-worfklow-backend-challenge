@@ -1,7 +1,7 @@
 import type { Task } from '../models/Task';
 import type { Result } from '../models/Result';
 import type { Workflow } from '../models/Workflow';
-import { TaskStatus } from '../workers/taskRunner';
+import { TaskStatus } from '../models/Task';
 import { JobErrorReason } from '../utils/serializeJobError';
 
 /**

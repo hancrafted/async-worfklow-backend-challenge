@@ -4,7 +4,7 @@ import { DataSource } from "typeorm";
 import { Task } from "../../../src/models/Task";
 import { Result } from "../../../src/models/Result";
 import { Workflow } from "../../../src/models/Workflow";
-import { TaskStatus } from "../../../src/workers/taskRunner";
+import { TaskStatus } from "../../../src/models/Task";
 import type { Job } from "../../../src/jobs/Job";
 import { drainWorker } from "./drainWorker";
 import { seedWorkflow } from "./seedWorkflow";
