@@ -108,6 +108,8 @@ real HTTP server end-to-end with the same shapes a caller would see.
 
 ## 3. How to verify each requirement
 
+> Run `sudo apt-get update && sudo apt-get install -y sqlite3` if sqlite3 is not installed in codesandbox
+
 The verification surface is `interview/manual_test_plan/` — one happy
 script per README requirement, plus one sad script per requirement
 *except* §03a (whose sad-path coverage lives in
@@ -130,11 +132,7 @@ All scripts source `_lib.sh` for shared helpers (`require_server`,
   that mutate the DB revert via `trap EXIT`. No script reads global
   counts; scripts may run in any order against a shared server.
 
-**Batch run** (zero `BROKEN` lines is the green bar):
 
-```
-for s in interview/manual_test_plan/0*.sh; do "$s" || echo BROKEN; done
-```
 
 | README req | Rationale | Happy | Sad | What it asserts |
 |---|---|---|---|---|
