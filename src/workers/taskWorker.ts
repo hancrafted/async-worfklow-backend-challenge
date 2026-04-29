@@ -1,11 +1,8 @@
 import type { DataSource, Repository } from 'typeorm';
-import { AppDataSource } from '../data-source';
 import { Task } from '../models/Task';
 import { Workflow, WorkflowStatus } from '../models/Workflow';
 import { TaskRunner, TaskStatus } from './taskRunner';
 import * as logger from '../utils/logger';
-
-const POLL_INTERVAL_MS = 5000;
 
 /**
  * Runs at most one queued task. Returns `true` if a task was claimed and
@@ -117,16 +114,6 @@ export async function runWorkerLoop({
             await sleepFn(sleepMs);
         }
     }
-}
-
-export async function taskWorker(): Promise<void> {
-    const taskRepository = AppDataSource.getRepository(Task);
-    const stopSignal: StopSignal = { stopped: false };
-    await runWorkerLoop({
-        tickFn: () => tickOnce(taskRepository),
-        sleepMs: POLL_INTERVAL_MS,
-        stopSignal,
-    });
 }
 
 /**
