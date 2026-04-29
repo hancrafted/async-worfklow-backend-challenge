@@ -14,13 +14,13 @@ This document covers:
 | Readme.md | Original challenge brief (unmodified). |
 | plan/PRD.md | Locked product spec — every requirement and assumption pinned with a production-grade alternative. |
 | plan/INTERVIEW_PRD.md | Meta-spec for this document. |
-| interview/manual_test_plan/ | Shell scripts (happy + sad per requirement) and rationale .md files. The verification surface for §3. |
-| interview/archive/ | Long-form rationale and pre-rebuild material. Linked from §4 design decisions. |
+| interview/manual_test_plan/ | Shell scripts (happy + sad per requirement) and rationale .md files. The verification surface for §4. |
+| interview/archive/ | Long-form rationale and pre-rebuild material. Linked from §5 design decisions. |
 | tests/ | Vitest suite (135 tests), one folder per README requirement. |
-| npm run manual-test:all | Run every happy + sad shell script sequentially. Per-script commands also exist (see §3). |
+| npm run manual-test:all | Run every happy + sad shell script sequentially. Per-script commands also exist (see §4). |
 | npm test | Run the full Vitest suite. |
 
-## 2. Process
+## 2. Planning Process and Execution
 
 ```mermaid
 flowchart TD
@@ -41,7 +41,35 @@ flowchart TD
 
 GitHub issues: [hancrafted/async-worfklow-backend-challenge/issues](https://github.com/hancrafted/async-worfklow-backend-challenge/issues).
 
-## 3. Verification
+## 3. Harness
+
+Layered Husky hooks gate every code edit before it reaches `main`. Both
+hooks are unbypassable — `--no-verify` is forbidden in `CLAUDE.md` and
+was verified during Task 0.
+
+```mermaid
+flowchart TD
+    A[Code edit] --> B[pre-commit hook]
+    B -->|fail| A
+    B -->|pass| C[Local commit]
+    C --> D[pre-push hook]
+    D -->|fail| A
+    D -->|pass| E[Push branch]
+    E --> F[Manual test plan run]
+    F -->|fail| A
+    F -->|pass| G[PR review HITL]
+    G -->|change request| A
+    G -->|approve| H[Merge to main]
+```
+
+| Gate | What runs |
+| --- | --- |
+| `.husky/pre-commit` | ESLint + `tsc --noEmit` + `vitest related --run` against staged `*.ts` only. Fast enough to keep auto-commit cheap on doc-only edits and atomic commits cheap on code edits. |
+| `.husky/pre-push` | Full `npm test` suite plus lint. |
+| Manual test plan | Exercises the real HTTP server end-to-end (see §4). |
+| PR review (HITL) | Final human checkpoint before merge. |
+
+## 4. Verification
 
 > Prerequisite: sudo apt-get update && sudo apt-get install -y sqlite3if sqlite3 is not present (e.g. codesandbox).
 
@@ -76,11 +104,11 @@ Direct `bash interview/manual_test_plan/<script>.sh` invocation alsoworks. See `
 
 For deeper plumbing — fixtures, helper signatures, archived per-tasknotes — see `interview/manual_test_plan/README.md`.
 
-## 4. Design decisions
+## 5. Design decisions
 
 The six entries below are the calls most likely to draw pushback. Eachcovers *what was done* / *why* / *production-grade alternative*.Complete trade-off bookkeeping (every per-task call) lives in`interview/archive/design_decisions.md`,with long-form rebuttals alongside.
 
-### 4.1 No lease, no heartbeat on `in_progress` tasks (Tier A)
+### 5.1 No lease, no heartbeat on `in_progress` tasks (Tier A)
 
 **What.** The atomic claim is a single `UPDATE tasks SET status = 'in_progress' WHERE taskId = ? AND status = 'queued'`. No `claimedAt`,no `leaseExpiresAt`, no heartbeat goroutine, no boot-time recoverysweep.
 
@@ -88,7 +116,7 @@ The six entries below are the calls most likely to draw pushback. Eachcovers *wh
 
 **Production-grade.** Persistent DB + TypeORM migrations + boot-timerecovery sweep resetting stale `in_progress` rows older than the workerheartbeat back to `queued`.
 
-### 4.2 Worker-pool default journey: 3 → 1 → 3 (Tier A)
+### 5.2 Worker-pool default journey: 3 → 1 → 3 (Tier A)
 
 **What.** `DEFAULT_WORKER_POOL_SIZE` evolved across three steps:
 
@@ -100,7 +128,7 @@ The six entries below are the calls most likely to draw pushback. Eachcovers *wh
 
 **Production-grade.** Same shape — per-worker DataSources are theproduction form. Horizontal scaling adds N processes / containers eachrunning `startWorkerPool` independently.
 
-### 4.3 Output stored on `Result`, not `Task` (Tier A)
+### 5.3 Output stored on `Result`, not `Task` (Tier A)
 
 **What.** Job output lives on `Result.data` keyed off `Task.resultId`.No `Task.output` column exists, despite Readme §1 stating *"save theresult in the output field of the task."*
 
@@ -108,7 +136,7 @@ The six entries below are the calls most likely to draw pushback. Eachcovers *wh
 
 **Production-grade.** Same shape; `Result` rows would later move toobject storage keyed by `resultId` while `Task` stays in OLTP.
 
-### 4.4 Coroutines on a shared event loop, not worker threads (Tier A)
+### 5.4 Coroutines on a shared event loop, not worker threads (Tier A)
 
 **What.** `startWorkerPool` spawns N `runWorkerLoop(...)` coroutines onthe **same event loop** (cooperative concurrency via `async`/`await`),not OS threads via `node:worker_threads`.
 
@@ -116,7 +144,7 @@ The six entries below are the calls most likely to draw pushback. Eachcovers *wh
 
 **Production-grade.** Same shape until a CPU-bound job appears; atthat point worker threads (or out-of-process job runners) areappropriate for that specific job, not the whole pool.
 
-### 4.5 Strict `400 WORKFLOW_FAILED` on `/results` (Issue #22) (Tier A)
+### 5.5 Strict `400 WORKFLOW_FAILED` on `/results` (Issue #22) (Tier A)
 
 **What.** A `failed` terminal workflow returns `400 { error: "WORKFLOW_FAILED" }` from `GET /workflow/:id/results`, not `200` withthe `finalResult` envelope. `completed` keeps `200`.
 
@@ -130,7 +158,7 @@ Full Issue #22 trail in`interview/archive/design_decisions.md`under `§Task 6`.
 
 **Production-grade.** Same — strict HTTP semantics scale better acrosscaller boundaries than overloaded payloads.
 
-### 4.6 Eager `finalResult` write + lazy patch on `/results` read (Tier B)
+### 5.6 Eager `finalResult` write + lazy patch on `/results` read (Tier B)
 
 **What.** `finalResult` handling has two paths:
 
@@ -143,7 +171,7 @@ The query handler never advances workflow lifecycle; lifecycle flipsremain exclu
 
 **Production-grade.** Emit a domain event (`workflow.finalized`) when`finalResult` is written; downstream consumers subscribe instead ofpolling.
 
-### 4.7 Pushback → defense file
+### 5.7 Pushback → defense file
 
 | Pushback | Prepared defense |
 | --- | --- |
