@@ -43,9 +43,7 @@ GitHub issues: [hancrafted/async-worfklow-backend-challenge/issues](https://gith
 
 ## 3. Harness
 
-Layered Husky hooks gate every code edit before it reaches `main`. Both
-hooks are unbypassable — `--no-verify` is forbidden in `CLAUDE.md` and
-was verified during Task 0.
+Layered Husky hooks gate every code edit before it reaches `main`. Bothhooks are unbypassable — `--no-verify` is forbidden in `CLAUDE.md` andwas verified during Task 0.
 
 ```mermaid
 flowchart TD
@@ -64,27 +62,26 @@ flowchart TD
 
 | Gate | What runs |
 | --- | --- |
-| `.husky/pre-commit` | ESLint + `tsc --noEmit` + `vitest related --run` against staged `*.ts` only. Fast enough to keep auto-commit cheap on doc-only edits and atomic commits cheap on code edits. |
-| `.husky/pre-push` | Full `npm test` suite plus lint. |
+| .husky/pre-commit | ESLint + tsc --noEmit + vitest related --run against staged *.ts only. Fast enough to keep auto-commit cheap on doc-only edits and atomic commits cheap on code edits. |
+| .husky/pre-push | Full npm test suite plus lint. |
 | Manual test plan | Exercises the real HTTP server end-to-end (see §4). |
 | PR review (HITL) | Final human checkpoint before merge. |
 
-## 4. Verification
+## 4. Manual verification of requirements
 
-> Prerequisite: sudo apt-get update && sudo apt-get install -y sqlite3if sqlite3 is not present (e.g. codesandbox).
+Verification uses simple shell scripts under `interview/manual_test_plan/`
+that exercise the live HTTP server and read task progress directly from
+the SQLite database via `sqlite3`. Each script prints `[PASS]`/`[FAIL]`
+lines and exits non-zero on failure.
 
-The verification surface lives in `interview/manual_test_plan/`:
+The §03a workflow chains **over 20 interdependent tasks** through a
+`dependsOn` graph. This deliberately stresses coroutine concurrency
+across the per-worker SQLite DataSources — multiple workers claim and
+advance ready tasks in parallel while parents block dependents until
+complete.
 
-1. One happy script per README requirement.
-2. One sad script per requirement, except §03a — its sad-path coveragelives in `tests/03-interdependent-tasks/`.
-3. Six rationale `.md` files explaining *what each script proves* and*what to look for in the output*, without restating thecurl/sqlite/jq plumbing.
-4. All scripts source `_lib.sh` for shared helpers (`require_server`,`post_analysis`, `wait_terminal`, `assert_*`, `summarize`, fixtures).
-
-**Script contract** (locked in `plan/INTERVIEW_PRD.md` Round-10 grill):
-
-- Each assertion prints `[PASS]` or `[FAIL]` plus the evidence checked.Scripts end with `summarize` and exit non-zero on any failure, givinga one-glance batch verdict.
-- **Two-terminal pattern** (Q6) — Terminal A runs `npm start`; TerminalB runs the script(s). No script manages server lifecycle. Unreachable`:3000` triggers an actionable error from `_lib.sh::require_server`.
-- **WorkflowId-scoped hermeticity** (Q7) — each script captures its own`$WORKFLOW_ID` and filters every SQL/HTTP assertion by it. Sad scriptsthat mutate the DB revert via `trap EXIT`. No global counts; scriptsrun in any order against a shared server.
+> Prerequisite: `sudo apt-get update && sudo apt-get install -y sqlite3`
+> if `sqlite3` is not present (e.g. codesandbox).
 
 **Running the scripts via npm.** Each shell script is wired as an npmscript for convenience:
 
