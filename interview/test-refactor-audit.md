@@ -91,8 +91,21 @@ Tier C — pure rename, no mutation cycle.
 
 ## Phase 9
 
+Co-located the 5 unit-test files next to their `src/` SUT modules. Three are
+byte-equivalent ports (Tier B); two are merges (Tier A) — one merge per shared
+module. Mutation cycles below: 3 Tier-B (one per port) + 4 Tier-A (one per
+merged source file's coverage). Old `/tests/` files left untouched (verified
+via `git diff tests/`).
+
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| error-response.unit.test.ts (`describe("happy path: emits { error, message } …")`) | src/utils/errorResponse.test.ts (same describe) | src/utils/errorResponse.ts: `res.status(status).json({ error: code, message })` → `{ error: "WRONG", message }` | ✅ | ✅ | ✅ |
+| workflow-factory.unit.test.ts (`describe("happy path: persists workflow + tasks atomically with the right waiting/queued mix")`) | src/workflows/WorkflowFactory.test.ts (same describe) | src/workflows/WorkflowFactory.ts: `buildTasks` `task.status = dependsOn.length === 0 ? Queued : Waiting` → `task.status = TaskStatus.Queued` (every task starts queued) | ✅ | ✅ | ✅ |
+| synthesize-final-result.unit.test.ts (`describe("synthesizeFinalResult — happy path")`) | src/workflows/synthesizeFinalResult.test.ts (same describe) | src/workflows/synthesizeFinalResult.ts: `[...tasks].sort((a, b) => a.stepNumber - b.stepNumber)` → `[...tasks]` (ascending sort dropped) | ✅ | ✅ | ✅ |
+| cycle-detector.unit.test.ts (`describe("detectDependencyCycle — pure DAG / cycle / self-dep checker")`) | src/workflows/dependencyValidator.test.ts (same top-level describe) | src/workflows/dependencyValidator.ts: `detectDependencyCycle` short-circuited to `return null` (every graph reported as a DAG) | ✅ | ✅ | ✅ |
+| dependency-validator.unit.test.ts (`describe("validateWorkflowSteps — in-memory dependency validator")`) | src/workflows/dependencyValidator.test.ts (same top-level describe) | src/workflows/dependencyValidator.ts: `validateWorkflowSteps` skip `checkReferences` (missing-step + cycle gate dropped) | ✅ | ✅ | ✅ |
+| dependson-translator.unit.test.ts (`describe("translateDependsOnToStepNumbers — pure helper (Task 5, US16)")`) | src/routes/workflowRoutes.test.ts (same top-level describe) | src/routes/workflowRoutes.ts: `translateDependsOnToStepNumbers` map body → `return 0` (lookup + orphan throw collapsed) | ✅ | ✅ | ✅ |
+| lazy-patch-final-result.unit.test.ts (`describe("applyLazyFinalResultPatch — pure helper (Task 6, lazy patch)")`) | src/routes/workflowRoutes.test.ts (same top-level describe) | src/routes/workflowRoutes.ts: `applyLazyFinalResultPatch` UPDATE WHERE clause `finalResult: IsNull()` removed (pre-populated finalResult overwritten) | ✅ | ✅ | ✅ |
 
 ## Phase 10
 
