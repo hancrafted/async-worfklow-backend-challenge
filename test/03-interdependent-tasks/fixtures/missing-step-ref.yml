@@ -1,0 +1,7 @@
+name: "missing_step_ref"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [9]

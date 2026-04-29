@@ -1,0 +1,6 @@
+name: "duplicate_step"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 1

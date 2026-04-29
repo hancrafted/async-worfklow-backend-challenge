@@ -58,10 +58,15 @@ Tier C — pure rename, no mutation cycle.
 | report-generation.test.ts (`describe("happy path: report aggregates upstream outputs")`) | report-generation.test.ts (`describe("happy path: report aggregates upstream outputs")`) | src/jobs/ReportGenerationJob.ts: `tasks: tasks` → `tasks: []` (drop aggregated entries from response) | ✅ | ✅ | ✅ |
 | report-generation.test.ts (`describe("error path: defensive handling of malformed upstream envelopes")`) | report-generation.test.ts (`describe("error path: defensive handling of malformed upstream envelopes")`) | src/workers/taskRunner.ts: `JSON.parse(result.data)` wrapped in try/catch returning `null` (swallow corruption) | ✅ | ✅ | ✅ |
 
-## Phase 5
+## Phase 5 — §3 + absorbed 03b-ii dependency sub-wave
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
 |---|---|---|---|---|---|
+| tasks-can-be-chained-through-dependencies.test.ts (`describe("error path: invalid dependency graph rejected at creation time")`) | tasks-can-be-chained-through-dependencies.test.ts (`describe("error path: invalid dependency graph rejected at creation time")`) | src/workflows/dependencyValidator.ts: `detectDependencyCycle(...)` short-circuited to `return null` | ✅ | ✅ | ✅ |
+| tasks-can-be-chained-through-dependencies.test.ts (`describe("happy path: N=3 workers, 1 queued task, exactly one execution")`) | tasks-can-be-chained-through-dependencies.test.ts (`describe("happy path: N=3 workers, 1 queued task, exactly one execution")`) | src/workers/taskWorker.ts: `claimTaskAndBumpWorkflow` claim guard removed (`WHERE status='queued'` dropped, `claim.affected !== 1` early-return removed) — atomic-claim primitive disabled | ✅ (`runSpy` called 3x) | ✅ (`runSpy` called 3x) | ✅ |
+| 03b-ii-Dependency/01-lifecycle-claim-bump.test.ts (`describe("happy path")`) | lifecycle-claim-bump.test.ts (`describe("happy path")`) | src/workers/taskWorker.ts: workflow `initial→in_progress` UPDATE in `claimTaskAndBumpWorkflow` removed | ✅ | ✅ | ✅ |
+| 03b-ii-Dependency/02-promotion-envelope.test.ts (`describe("happy path")`) | promotion-envelope.test.ts (`describe("happy path")`) | src/workers/taskRunner.ts: `promoteReadyTasks` `completedTaskIds` replaced with empty `Set<string>()` — promotion never fires | ✅ (`ranCount` = 1, expected 2) | ✅ (`ranCount` = 1, expected 2) | ✅ |
+| 03b-ii-Dependency/03-fail-fast-sweep.test.ts (`describe("happy path")`, `describe("error path")`) | fail-fast-sweep.test.ts (`describe("happy path")`, `describe("error path")`) | src/workers/taskRunner.ts: `sweepFailedSiblings` body removed (UPDATE + in-memory mirror both gone) | ✅ (siblings stay `waiting`) | ✅ (siblings stay `waiting`) | ✅ |
 
 ## Phase 6
 

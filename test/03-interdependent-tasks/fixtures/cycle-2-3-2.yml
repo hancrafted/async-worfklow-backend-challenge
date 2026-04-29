@@ -1,0 +1,10 @@
+name: "cycle_2_3_2"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [3]
+  - taskType: "notification"
+    stepNumber: 3
+    dependsOn: [2]
