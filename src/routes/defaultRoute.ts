@@ -2,6 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { marked } from "marked";
+import * as logger from "../utils/logger";
 
 const router = express.Router();
 const staticPath = path.join(__dirname, "../../public");
@@ -11,7 +12,7 @@ router.get("/", (req, res) => {
   const readmePath = path.join(__dirname, "../..", "README.md");
   fs.readFile(readmePath, "utf8", (err, data) => {
     if (err) {
-      console.error("Error reading README.md:", err);
+      logger.error("Error reading README.md", { error: err });
       return res.status(500).send("Error loading README.md");
     }
 

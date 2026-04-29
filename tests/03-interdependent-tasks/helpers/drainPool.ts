@@ -4,7 +4,7 @@ import {
   tickOnce,
   type StopSignal,
 } from "../../../src/workers/taskWorker";
-import { TaskStatus } from "../../../src/workers/taskRunner";
+import { TaskStatus } from "../../../src/models/Task";
 import { Task } from "../../../src/models/Task";
 
 const DEFAULT_MAX_TICKS_PER_WORKER = 1000;

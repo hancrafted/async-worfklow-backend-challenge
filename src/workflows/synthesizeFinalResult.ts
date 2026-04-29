@@ -1,7 +1,7 @@
 import type { Task } from '../models/Task';
 import type { Result } from '../models/Result';
 import type { Workflow } from '../models/Workflow';
-import { TaskStatus } from '../workers/taskRunner';
+import { TaskStatus } from '../models/Task';
 import { JobErrorReason } from '../utils/serializeJobError';
 
 /**
@@ -96,13 +96,18 @@ function parseOutputOrNull(result: Result | undefined): unknown {
     }
 }
 
+const UNKNOWN_JOB_ERROR: { message: string; reason: JobErrorReason } = {
+    message: 'unknown',
+    reason: JobErrorReason.JobError,
+};
+
 function extractPublicError(result: Result | undefined): { message: string; reason: JobErrorReason } {
-    if (!result || !result.error) return { message: 'unknown', reason: JobErrorReason.JobError };
+    if (!result || !result.error) return UNKNOWN_JOB_ERROR;
     try {
         const parsed = JSON.parse(result.error) as { message?: unknown };
-        const message = typeof parsed.message === 'string' ? parsed.message : 'unknown';
+        const message = typeof parsed.message === 'string' ? parsed.message : UNKNOWN_JOB_ERROR.message;
         return { message, reason: JobErrorReason.JobError };
     } catch {
-        return { message: 'unknown', reason: JobErrorReason.JobError };
+        return UNKNOWN_JOB_ERROR;
     }
 }

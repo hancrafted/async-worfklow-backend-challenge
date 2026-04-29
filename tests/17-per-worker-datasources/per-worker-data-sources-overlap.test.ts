@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { In, type DataSource } from "typeorm";
 import { Task } from "../../src/models/Task";
 import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import {
   startWorkerPool,
   type StopSignal,

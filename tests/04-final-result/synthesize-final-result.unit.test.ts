@@ -4,7 +4,7 @@ import { synthesizeFinalResult } from "../../src/workflows/synthesizeFinalResult
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
 import { Workflow } from "../../src/models/Workflow";
-import { TaskStatus } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
 import { JobErrorReason } from "../../src/utils/serializeJobError";
 
 // Pure-function unit tests for the framework-owned `finalResult` synthesizer.

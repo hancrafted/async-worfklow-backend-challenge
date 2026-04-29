@@ -1,6 +1,20 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Workflow } from './Workflow';
-import {TaskStatus} from "../workers/taskRunner";
+
+export enum TaskStatus {
+    Queued = 'queued',
+    Waiting = 'waiting',
+    InProgress = 'in_progress',
+    Completed = 'completed',
+    Failed = 'failed',
+    Skipped = 'skipped'
+}
+
+export const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+    TaskStatus.Completed,
+    TaskStatus.Failed,
+    TaskStatus.Skipped,
+]);
 
 @Entity({ name: 'tasks' })
 export class Task {

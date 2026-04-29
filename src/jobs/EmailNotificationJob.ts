@@ -1,11 +1,18 @@
 import { Job, JobContext } from './Job';
+import * as logger from '../utils/logger';
 
 export class EmailNotificationJob implements Job {
     async run(context: JobContext): Promise<void> {
         const { task } = context;
-        console.log(`Sending email notification for task ${task.taskId}...`);
+        const logContext = {
+            workflowId: task.workflowId,
+            taskId: task.taskId,
+            stepNumber: task.stepNumber,
+            taskType: task.taskType,
+        };
+        logger.info('sending email notification', logContext);
         // Perform notification work
         await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('Email sent!');
+        logger.info('email sent', logContext);
     }
 }

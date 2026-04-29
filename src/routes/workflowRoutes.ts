@@ -4,7 +4,7 @@ import { AppDataSource } from '../data-source';
 import type { Task } from '../models/Task';
 import { Result } from '../models/Result';
 import { Workflow, WorkflowStatus } from '../models/Workflow';
-import { TaskStatus } from '../workers/taskRunner';
+import { TaskStatus } from '../models/Task';
 import { ApiErrorCode, errorResponse } from '../utils/errorResponse';
 import { JobErrorReason } from '../utils/serializeJobError';
 import {

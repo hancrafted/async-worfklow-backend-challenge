@@ -1,28 +1,12 @@
 import { In, IsNull, type Repository, type EntityManager } from 'typeorm';
-import { Task } from '../models/Task';
+import { Task, TaskStatus, TERMINAL_TASK_STATUSES } from '../models/Task';
 import { getJobForTaskType } from '../jobs/JobFactory';
-import { WorkflowStatus } from "../workflows/WorkflowFactory";
-import { Workflow } from "../models/Workflow";
+import { Workflow, WorkflowStatus } from "../models/Workflow";
 import { Result } from "../models/Result";
 import type { JobDependencyOutput } from '../jobs/Job';
 import { serializeJobError, type SerializedJobError } from '../utils/serializeJobError';
 import { synthesizeFinalResult } from '../workflows/synthesizeFinalResult';
 import * as logger from '../utils/logger';
-
-export enum TaskStatus {
-    Queued = 'queued',
-    Waiting = 'waiting',
-    InProgress = 'in_progress',
-    Completed = 'completed',
-    Failed = 'failed',
-    Skipped = 'skipped'
-}
-
-const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
-    TaskStatus.Completed,
-    TaskStatus.Failed,
-    TaskStatus.Skipped,
-]);
 
 type JobOutcome =
     | { status: TaskStatus.Completed; data: unknown }

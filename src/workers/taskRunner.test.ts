@@ -1,11 +1,11 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DataSource } from "typeorm";
-import { TaskRunner, TaskStatus } from "./taskRunner";
-import { Task } from "../models/Task";
+import { TaskRunner } from "./taskRunner";
+import { Task, TaskStatus } from "../models/Task";
 import { Result } from "../models/Result";
 import { Workflow } from "../models/Workflow";
-import { WorkflowStatus } from "../workflows/WorkflowFactory";
+import { WorkflowStatus } from "../models/Workflow";
 import type { Job, JobContext } from "../jobs/Job";
 
 // Module under test injects its job via `getJobForTaskType`. We mock that

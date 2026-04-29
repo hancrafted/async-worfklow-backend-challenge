@@ -3,16 +3,13 @@ import * as yaml from 'js-yaml';
 import { v4 as uuid } from 'uuid';
 import type { DataSource } from 'typeorm';
 import { Workflow, WorkflowStatus } from '../models/Workflow';
-import { Task } from '../models/Task';
-import { TaskStatus } from '../workers/taskRunner';
+import { Task, TaskStatus } from '../models/Task';
 import { ApiErrorCode } from '../utils/errorResponse';
 import {
     validateWorkflowSteps,
     type NormalisedStep,
     type ValidationFinding,
 } from './dependencyValidator';
-
-export { WorkflowStatus };
 
 type ParseOutcome =
     | { parsed: unknown; finding: null }

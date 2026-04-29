@@ -22,17 +22,33 @@ export interface BuildDataSourceOptions {
  * per-worker DataSources read concurrently while writers serialise at the
  * SQLite layer instead of corrupting JS-level transaction state on a shared
  * connection.
+ *
+ * Defaults (`dropSchema: false`, `synchronize: false`) match the per-worker
+ * profile; `buildAppDataSource` overrides `synchronize` to keep the
+ * bootstrap-side default that owns the schema.
  */
-export function buildAppDataSource(options: BuildDataSourceOptions = {}): DataSource {
+function buildDataSource(options: BuildDataSourceOptions = {}): DataSource {
     return new DataSource({
         type: 'sqlite',
         database: options.databasePath ?? PRODUCTION_DATABASE_PATH,
         dropSchema: options.dropSchema ?? false,
         entities: [Task, Result, Workflow],
-        synchronize: options.synchronize ?? true,
+        synchronize: options.synchronize ?? false,
         logging: false,
         enableWAL: true,
         busyTimeout: SQLITE_BUSY_TIMEOUT_MS,
+    });
+}
+
+/**
+ * Bootstrap-side DataSource. Defaults `synchronize: true` so the boot site
+ * owns schema creation; callers opt into `dropSchema: true` for the
+ * fresh-DB-on-restart guarantee (PRD §General).
+ */
+export function buildAppDataSource(options: BuildDataSourceOptions = {}): DataSource {
+    return buildDataSource({
+        ...options,
+        synchronize: options.synchronize ?? true,
     });
 }
 
@@ -43,15 +59,10 @@ export function buildAppDataSource(options: BuildDataSourceOptions = {}): DataSo
  * the bootstrap DataSource in `index.ts` is the sole schema author.
  */
 export function buildWorkerDataSource(databasePath: string = PRODUCTION_DATABASE_PATH): DataSource {
-    return new DataSource({
-        type: 'sqlite',
-        database: databasePath,
+    return buildDataSource({
+        databasePath,
         dropSchema: false,
-        entities: [Task, Result, Workflow],
         synchronize: false,
-        logging: false,
-        enableWAL: true,
-        busyTimeout: SQLITE_BUSY_TIMEOUT_MS,
     });
 }
 

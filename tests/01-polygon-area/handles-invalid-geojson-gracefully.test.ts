@@ -5,12 +5,10 @@ import { DataSource } from "typeorm";
 import { PolygonAreaJob } from "../../src/jobs/PolygonAreaJob";
 import { Task } from "../../src/models/Task";
 import { Result } from "../../src/models/Result";
-import { Workflow } from "../../src/models/Workflow";
-import { TaskRunner, TaskStatus } from "../../src/workers/taskRunner";
-import {
-  WorkflowFactory,
-  WorkflowStatus,
-} from "../../src/workflows/WorkflowFactory";
+import { Workflow, WorkflowStatus } from "../../src/models/Workflow";
+import { TaskRunner } from "../../src/workers/taskRunner";
+import { TaskStatus } from "../../src/models/Task";
+import { WorkflowFactory } from "../../src/workflows/WorkflowFactory";
 
 const VALID_POLYGON = JSON.stringify({
   type: "Polygon",

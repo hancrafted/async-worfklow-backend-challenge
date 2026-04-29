@@ -2,11 +2,18 @@ import { Job, JobContext } from './Job';
 import booleanWithin from '@turf/boolean-within';
 import { Feature, Polygon } from 'geojson';
 import countryMapping from '../data/world_data.json';
+import * as logger from '../utils/logger';
 
 export class DataAnalysisJob implements Job {
     async run(context: JobContext): Promise<string> {
         const { task } = context;
-        console.log(`Running data analysis for task ${task.taskId}...`);
+        const logContext = {
+            workflowId: task.workflowId,
+            taskId: task.taskId,
+            stepNumber: task.stepNumber,
+            taskType: task.taskType,
+        };
+        logger.info('running data analysis', logContext);
 
         const inputGeometry: Feature<Polygon> = JSON.parse(task.geoJson);
 
@@ -14,7 +21,7 @@ export class DataAnalysisJob implements Job {
             if (countryFeature.geometry.type === 'Polygon' || countryFeature.geometry.type === 'MultiPolygon') {
                 const isWithin = booleanWithin(inputGeometry, countryFeature as Feature<Polygon>);
                 if (isWithin) {
-                    console.log(`The polygon is within ${countryFeature.properties?.name}`);
+                    logger.info(`polygon is within ${countryFeature.properties?.name}`, logContext);
                     return countryFeature.properties?.name;
                 }
             }

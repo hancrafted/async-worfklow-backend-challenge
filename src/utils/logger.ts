@@ -9,7 +9,7 @@
  * to the first 10 lines, matching `serializeJobError` (PRD §11).
  */
 
-export const MAX_LOG_STACK_LINES = 10;
+import { truncateStack } from './truncateStack';
 
 export enum LogLevel {
     Info = 'info',
@@ -45,10 +45,7 @@ function serializeError(error: unknown): SerializedLogError {
     if (error instanceof Error) {
         const serialized: SerializedLogError = { message: error.message };
         if (error.stack) {
-            serialized.stack = error.stack
-                .split('\n')
-                .slice(0, MAX_LOG_STACK_LINES)
-                .join('\n');
+            serialized.stack = truncateStack(error.stack);
         }
         return serialized;
     }
