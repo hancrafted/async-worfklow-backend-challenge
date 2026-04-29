@@ -23,6 +23,7 @@ module.exports = tseslint.config(
       "src/data/**",
       "public/**",
       ".husky/**",
+      "interview/archive/**",
       ...legacySrcFiles,
     ],
   },

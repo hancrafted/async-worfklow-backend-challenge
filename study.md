@@ -19,7 +19,7 @@
 
 ## Progress Log
 
-- *(no sessions yet)*
+- 2026-04-29 — covered §1.1 (30m). Recall 2/3. Revisit: §1.1 — N+1 connection count and the "axes-of-change vs. substrate-swap" framing on the 1000× redesign; rehearse the 90-second original whiteboard before any redesign drill. Notes: keep/replace/don't-know shape was right; sketch of the current system was skipped and the redesign jumped to Postgres+Docker without naming the topology axes (claim substrate, worker-fleet management, result storage).
 
 ## Top-level checklist (jump to any block)
 
@@ -74,7 +74,7 @@
 
 **Application question (open, AI grades).** Whiteboard this system on a blank page in 90 seconds. Then redraw it as you'd run it at **1000× scale** (1000 workflows/s, 100k workers across a fleet). Name *one* thing you'd keep, *one* thing you'd replace, and *one* thing you don't yet know how you'd solve. (Rubric: clarity of original, honesty of "don't yet know", soundness of the replacement choice.)
 
-- [ ] §1.1 complete
+- [x] §1.1 complete
 
 ### §1.2 Lifecycle, promotion, and fail-fast sweep (~45m)
 

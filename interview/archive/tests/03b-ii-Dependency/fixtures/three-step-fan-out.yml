@@ -1,0 +1,10 @@
+name: "three_step_fan_out_failure_fixture"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]
+  - taskType: "notification"
+    stepNumber: 3
+    dependsOn: [1]

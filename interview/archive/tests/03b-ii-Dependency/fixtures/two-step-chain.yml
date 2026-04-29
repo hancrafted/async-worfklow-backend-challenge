@@ -1,0 +1,7 @@
+name: "two_step_chain_envelope_fixture"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+    dependsOn: [1]

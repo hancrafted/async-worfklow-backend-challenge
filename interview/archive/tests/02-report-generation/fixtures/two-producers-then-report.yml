@@ -1,0 +1,9 @@
+name: "two_producers_then_report"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "analysis"
+    stepNumber: 2
+  - taskType: "reportGeneration"
+    stepNumber: 3
+    dependsOn: [1, 2]

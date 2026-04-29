@@ -1,0 +1,4 @@
+name: "unknown_tasktype"
+steps:
+  - taskType: "doesNotExist"
+    stepNumber: 1

@@ -1,0 +1,7 @@
+name: "single_producer_then_report"
+steps:
+  - taskType: "polygonArea"
+    stepNumber: 1
+  - taskType: "reportGeneration"
+    stepNumber: 2
+    dependsOn: [1]
