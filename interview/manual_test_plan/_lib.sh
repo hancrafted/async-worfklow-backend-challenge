@@ -12,7 +12,30 @@ PASS_COUNT=0
 FAIL_COUNT=0
 SCRIPT_NAME="$(basename "${BASH_SOURCE[1]:-${0}}")"
 
-VALID_POLYGON='{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
+VALID_POLYGON='{"type":"Polygon","coordinates":[
+            [
+                [
+                    -63.624885020050996,
+                    -10.311050368263523
+                ],
+                [
+                    -63.624885020050996,
+                    -10.367865108370523
+                ],
+                [
+                    -63.61278302732815,
+                    -10.367865108370523
+                ],
+                [
+                    -63.61278302732815,
+                    -10.311050368263523
+                ],
+                [
+                    -63.624885020050996,
+                    -10.311050368263523
+                ]
+            ]
+        ]}'
 INVALID_POLYGON='{"type":"Point","coordinates":[0,0]}'
 
 # Asserts the dev server is reachable. Exits with actionable help if not.
