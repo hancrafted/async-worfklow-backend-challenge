@@ -42,6 +42,8 @@ copy's equivalence via `diff` byte-identity.
 
 ## Phase 2
 
+Tier C — pure rename, no mutation cycle.
+
 ## Phase 3
 
 | Old file(s) | New file | Mutation | Old red? | New red? | Reverted clean? |
