@@ -62,7 +62,7 @@ flowchart TD
 
 | Gate | What runs |
 | --- | --- |
-| .husky/pre-commit | ESLint + tsc --noEmit + vitest related --run against staged *.ts only. Fast enough to keep auto-commit cheap on doc-only edits and atomic commits cheap on code edits. |
+| .husky/pre-commit | ESLint + tsc --noEmit + vitest related --run against staged *.ts only. Fast enough to keep auto-commit cheap on doc-only edits and atomic commits cheap on code edits. ESLint enforces strict Clean Code-style limits — complexity ≤ 10, function ≤ 80 lines, file ≤ 350 lines, depth ≤ 4, params ≤ 4 — plus type-checked async correctness (no-floating-promises, no-misused-promises, await-thenable). |
 | .husky/pre-push | Full npm test suite plus lint. |
 | Manual test plan | Exercises the real HTTP server end-to-end (see §4). |
 | PR review (HITL) | Final human checkpoint before merge. |
@@ -73,7 +73,7 @@ Verification uses simple shell scripts under `interview/manual_test_plan/` that 
 
 The §03a workflow chains **over 20 interdependent tasks** through a `dependsOn` graph. This deliberately stresses coroutine concurrency across the per-worker SQLite DataSources — multiple workers claim and advance ready tasks in parallel while parents block dependents until complete.
 
-> Prerequisite: `sudo apt-get update && sudo apt-get install -y sqlite3` if `sqlite3` is not present (e.g. codesandbox).
+> Prerequisite: sudo apt-get update && sudo apt-get install -y sqlite3 if sqlite3 is not present (e.g. codesandbox).
 
 **Running the scripts via npm.** Each shell script is wired as an npm script for convenience:
 
