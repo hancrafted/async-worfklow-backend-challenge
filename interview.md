@@ -1,88 +1,45 @@
 # Interviewer Readme
 
-This coding challenge was solved end-to-end with AI using a structured
-Human-in-the-Loop (HITL) approach: PRD grilling → ticketed TDD → manual
-verification → review.
+This coding challenge was solved end-to-end with AI using a structuredHuman-in-the-Loop (HITL) approach: PRD grilling → ticketed TDD → manualverification → review.
 
 This document covers:
 
-1. **How to verify each of the six README requirements** — one shell
-   script (and one npm command) per happy/sad path, plus rationale files
-   that explain what each script proves.
-2. **The pragmatic design decisions** made along the way, each
-   documenting the chosen *challenge-scope* solution alongside the
-   *production-grade* alternative.
+1. **How to verify each of the six README requirements** — one shellscript (and one npm command) per happy/sad path, plus rationale filesthat explain what each script proves.
+2. **The pragmatic design decisions** made along the way, eachdocumenting the chosen *challenge-scope* solution alongside the*production-grade* alternative.
 
 ## 1. Orientation
 
 | Path | Purpose |
-|---|---|
-| `Readme.md` | Original challenge brief (unmodified). |
-| `plan/PRD.md` | Locked product spec — every requirement and assumption pinned with a production-grade alternative. |
-| `plan/INTERVIEW_PRD.md` | Meta-spec for this document. |
-| `interview/manual_test_plan/` | Shell scripts (happy + sad per requirement) and rationale `.md` files. The verification surface for §3. |
-| `interview/archive/` | Long-form rationale and pre-rebuild material. Linked from §4 design decisions. |
-| `tests/` | Vitest suite (135 tests), one folder per README requirement. |
-| `npm run manual-test:all` | Run every happy + sad shell script sequentially. Per-script commands also exist (see §3). |
-| `npm test` | Run the full Vitest suite. |
+| --- | --- |
+| Readme.md | Original challenge brief (unmodified). |
+| plan/PRD.md | Locked product spec — every requirement and assumption pinned with a production-grade alternative. |
+| plan/INTERVIEW_PRD.md | Meta-spec for this document. |
+| interview/manual_test_plan/ | Shell scripts (happy + sad per requirement) and rationale .md files. The verification surface for §3. |
+| interview/archive/ | Long-form rationale and pre-rebuild material. Linked from §4 design decisions. |
+| tests/ | Vitest suite (135 tests), one folder per README requirement. |
+| npm run manual-test:all | Run every happy + sad shell script sequentially. Per-script commands also exist (see §3). |
+| npm test | Run the full Vitest suite. |
 
 ## 2. Process
 
-### 2.1 Planning timeline
-
 ```mermaid
 flowchart TD
-    A[Readme.md] -->|grill| B[plan/PRD.md]
-    B -->|to-issues skill| C[GitHub Issues 1-22]
-    C -->|per ticket| D[CLAUDE.md rules]
-    D -->|red-green-refactor| E[TDD implementation]
-    E -->|review + grill| F[Iterative hardening]
-    F -->|substrate fix| G[Issue 17 per-worker DS]
-    F -->|README literalness| H[Issue 22 strict 400]
-    G --> I[Manual test plan]
-    H --> I
-    I -->|grill again| J[plan/INTERVIEW_PRD.md]
-    J --> K[interview.md]
+    A[1. Readme.md] -->|grill-me 3x, 50+ questions<br/>+ to-prd skill| B[2. plan/PRD.md]
+    B -->|to-issues skill| C[3. GitHub Issues 1-22<br/>with dependencies]
+    C -->|tdd skill per ticket<br/>red-green-refactor| D[4. AI Orchestration<br/>with Augment Intent]
+    D --> D1[4a. Break ticket into waves]
+    D1 --> D2[4b. Per wave: Implementor + Verifier agents<br/>→ manual testing HITL via generated plan]
+    D2 --> D3[4c. Create PR]
+    D3 --> D4[4d. PR Review HITL]
+    D4 --> E[5. CLAUDE.md hardening]
+    E --> F[6. Refactoring every few tickets]
+    F --> G[7. Check against README requirements]
+    G --> H[8. plan/INTERVIEW_PRD.md]
+    H --> I[9. interview.md]
+    click C "https://github.com/hancrafted/async-worfklow-backend-challenge/issues" "GitHub Issues"
 ```
 
-Decomposition is top-down:
-
-1. `Readme.md` was processed through a grilling session into `plan/PRD.md`(303 lines; every assumption pinned with a *production-grade alternative*).
-2. The `to-issues` skill broke the PRD into 22 GitHub issues, one TDDticket each.
-3. `CLAUDE.md` codifies project rules: transactions wrap multi-row writes,ENUMs replace magic strings, no `--no-verify`, manual `drainWorker`over fake timers, one commit per task in conventional-commit form.
-4. Each ticket was implemented with the `tdd` skill (red → green →refactor), reviewed via HITL, and committed individually. The git logdoubles as a process audit.
-
-Two post-implementation grills produced follow-up issues:
-
-- **Issue #17** — worker-pool default journey. Shipped pragmatically at`1` against a shared SQLite connection, then fixed the substrate withper-worker DataSources + WAL to restore the production default of `3`.
-- **Issue #22** — reverted the lenient `200`-for-failed `/results` policyto the strict README-literal `400 WORKFLOW_FAILED`.
-
-The same grilling discipline produced `plan/INTERVIEW_PRD.md`, whichdrove this document.
-
-### 2.2 Execution feedback-loop
-
-```mermaid
-flowchart TD
-    A[Code edit] --> B[pre-commit hook]
-    B -->|fail| A
-    B -->|pass| C[Local commit]
-    C --> D[pre-push hook]
-    D -->|fail| A
-    D -->|pass| E[Push branch]
-    E --> F[Manual test plan run]
-    F -->|fail| A
-    F -->|pass| G[PR review HITL]
-    G -->|change request| A
-    G -->|approve| H[Merge to main]
-```
-
-Quality gates are layered Husky hooks (`.husky/pre-commit`,`.husky/pre-push`):
-
-1. `pre-commit` — ESLint + `tsc --noEmit` + `vitest related --run`against staged `*.ts` only. Fast enough to keep auto-commit cheap ondoc-only edits and atomic commits cheap on code edits.
-2. `pre-push` — full `npm test` suite plus lint.
-3. Both hooks are unbypassable. `--no-verify` is forbidden in `CLAUDE.md`and was verified during Task 0.
-
-HITL checkpoints sit at PR review and at the manual test plan run. Themanual test plan exercises the real HTTP server end-to-end with the sameshapes a caller would see — a documentation-stays-accurate gate that theautomated tests cannot provide.
+GitHub issues: [hancrafted/async-worfklow-backend-challenge/issues](https://github.com/hancrafted/async-worfklow-backend-challenge/issues).
 
 ## 3. Verification
 
