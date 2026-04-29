@@ -1,0 +1,1 @@
+This folder is archived. The current interview-facing documentation lives in `/interview.md` (root) and the rebuilt files alongside this folder. Do NOT cite anything in `archive/` as the current state of the project.

@@ -1,21 +1,92 @@
 name: "example_workflow"
 steps:
-  - taskType: "polygonArea"
-    stepNumber: 1
-  - taskType: "analysis"
-    stepNumber: 2
+  # Initial trigger step
   - taskType: "notification"
+    stepNumber: 1
+
+  # Divergence: 3 lane heads (polygonArea) become available immediately after step 1
+  - taskType: "polygonArea"
+    stepNumber: 2
+    dependsOn: [1]
+  - taskType: "polygonArea"
     stepNumber: 3
     dependsOn: [1]
-  - taskType: "notification"
+  - taskType: "polygonArea"
     stepNumber: 4
-    dependsOn: [2, 3]
-  - taskType: "notification"
+    dependsOn: [1]
+
+  # Lane second-step (analysis) per lane
+  - taskType: "analysis"
     stepNumber: 5
-    dependsOn: [3]
-  - taskType: "notification"
+    dependsOn: [2]
+  - taskType: "analysis"
     stepNumber: 6
-    dependsOn: [4]
-  - taskType: "reportGeneration"
+    dependsOn: [3]
+  - taskType: "analysis"
     stepNumber: 7
-    dependsOn: [5, 6]
+    dependsOn: [4]
+
+  # Lane 1 continuation
+  - taskType: "notification"
+    stepNumber: 8
+    dependsOn: [5]
+  - taskType: "notification"
+    stepNumber: 11
+    dependsOn: [8]
+  - taskType: "notification"
+    stepNumber: 14
+    dependsOn: [11]
+
+  # Lane 2 continuation
+  - taskType: "notification"
+    stepNumber: 9
+    dependsOn: [6]
+  - taskType: "notification"
+    stepNumber: 12
+    dependsOn: [9]
+  - taskType: "notification"
+    stepNumber: 15
+    dependsOn: [12]
+
+  # Lane 3 continuation
+  - taskType: "notification"
+    stepNumber: 10
+    dependsOn: [7]
+  - taskType: "notification"
+    stepNumber: 13
+    dependsOn: [10]
+  - taskType: "notification"
+    stepNumber: 16
+    dependsOn: [13]
+
+  # Convergence: waits for all 3 lanes to complete
+  - taskType: "notification"
+    stepNumber: 17
+    dependsOn: [14, 15, 16]
+
+  # Linear tail
+  - taskType: "notification"
+    stepNumber: 18
+    dependsOn: [17]
+  - taskType: "notification"
+    stepNumber: 19
+    dependsOn: [18]
+  - taskType: "notification"
+    stepNumber: 20
+    dependsOn: [19]
+
+  # Per-lane reports: each depends on its lane's [polygonArea, analysis]
+  - taskType: "reportGeneration"
+    stepNumber: 21
+    dependsOn: [2, 5]
+  - taskType: "reportGeneration"
+    stepNumber: 22
+    dependsOn: [3, 6]
+  - taskType: "reportGeneration"
+    stepNumber: 23
+    dependsOn: [4, 7]
+
+  # Final aggregation across all lane reports
+  - taskType: "reportGeneration"
+    stepNumber: 24
+    dependsOn: [21, 22, 23]
