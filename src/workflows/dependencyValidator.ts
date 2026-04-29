@@ -23,6 +23,11 @@ const KNOWN_TASK_TYPES = new Set([
   "reportGeneration",
 ]);
 
+enum DfsState {
+  Visiting,
+  Visited,
+}
+
 /**
  * Tarjan-style DFS cycle finder. Returns the closing path
  * (`[start, ..., start]`) for the first cycle hit, or `null` if the graph is
@@ -36,26 +41,24 @@ export function detectDependencyCycle(
     adjacency.set(node.stepNumber, [...node.dependsOn]);
   }
 
-  const VISITING = 1;
-  const VISITED = 2;
-  const state = new Map<number, number>();
+  const state = new Map<number, DfsState>();
   const stack: number[] = [];
   let cyclePath: number[] | null = null;
 
   const visit = (current: number): boolean => {
-    if (state.get(current) === VISITED) return false;
-    if (state.get(current) === VISITING) {
+    if (state.get(current) === DfsState.Visited) return false;
+    if (state.get(current) === DfsState.Visiting) {
       const start = stack.indexOf(current);
       cyclePath = [...stack.slice(start), current];
       return true;
     }
-    state.set(current, VISITING);
+    state.set(current, DfsState.Visiting);
     stack.push(current);
     for (const neighbour of adjacency.get(current) ?? []) {
       if (visit(neighbour)) return true;
     }
     stack.pop();
-    state.set(current, VISITED);
+    state.set(current, DfsState.Visited);
     return false;
   };
 
