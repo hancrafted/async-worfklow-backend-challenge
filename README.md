@@ -1,5 +1,7 @@
 # Backend Coding Challenge
 
+> For Reviewer please read the [interview.md](./interview.md)
+
 ## Getting Started
 
 1. Fork the Project:
