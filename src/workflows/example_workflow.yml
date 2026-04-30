@@ -64,16 +64,16 @@ steps:
     stepNumber: 17
     dependsOn: [14, 15, 16]
 
-  # Linear tail
+  # Concurrent possible after convergence
   - taskType: "notification"
     stepNumber: 18
     dependsOn: [17]
   - taskType: "notification"
     stepNumber: 19
-    dependsOn: [18]
+    dependsOn: [17]
   - taskType: "notification"
     stepNumber: 20
-    dependsOn: [19]
+    dependsOn: [17]
 
   # Per-lane reports: each depends on its lane's [polygonArea, analysis]
   - taskType: "reportGeneration"
