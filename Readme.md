@@ -1,7 +1,7 @@
 # Backend Coding Challenge
 
-> **For the reviewer.** Read [interview.md](./interview.md) as entry file.
- 
+> For Reviewer please read the [interview.md](./interview.md)
+
 ## Getting Started
 
 1. Fork the Project:
