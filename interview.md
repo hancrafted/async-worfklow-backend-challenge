@@ -95,43 +95,7 @@ For deeper plumbing — fixtures, helper signatures, archived per-task notes —
 
 ## 5. Design decisions
 
-The six entries below are the calls most likely to draw pushback. Each covers *what was done* / *why* / *production-grade alternative*. Complete trade-off bookkeeping (every per-task call) lives in `interview/archive/design_decisions.md`, with long-form rebuttals alongside.
-
-### 5.0 Task state transitions
-
-```mermaid
-stateDiagram-v2
-   
-    %% Workflow lifecycle
-    InProgress --> Completed : all tasks terminal (no failures)
-    InProgress --> Failed : any task fails → all non-terminal tasks swept to skipped
-    Completed --> [*]
-    Failed --> [*]
-
-    %% Task lifecycle (created directly into Queued or Waiting — no Initial state)
-    [*] --> Queued : no dependsOn, workflow created
-    [*] --> Waiting : has dependsOn, workflow created
-
-    Waiting --> Queued : all dependsOn completed (promotion sweep)
-    Queued --> InProgress : worker atomic UPDATE claim
-    InProgress --> Completed : job succeeded → Result.data saved
-    InProgress --> Failed : job threw → Result.error saved
-    Waiting --> Skipped : sibling failed (fail-fast sweep)
-    Queued --> Skipped : sibling failed (fail-fast sweep)
-
-    Completed --> [*]
-    Failed --> [*]
-    Skipped --> [*]
-```
-
-**Key transition rules (PRD §Decisions 2, 3, 8, 9):**
-
-- **Workflow `Initial`** — set when the workflow is created. Only the workflow has an `Initial` state; tasks are created directly as `Queued` (no deps) or `Waiting` (has deps).
-- **Claim + bump** — the same transaction that flips `task: queued→in_progress` also flips `workflow: initial→in_progress` (idempotent `WHERE status='initial'`).
-- **Promotion** — after a task completes, every `waiting` task whose entire `dependsOn` set is now `completed` is flipped to `queued` in a guarded UPDATE. This unblocks dependents so the worker pool can pick them up.
-- **Fail-fast sweep** — when any task fails, every `waiting`/`queued` sibling in the entire workflow is atomically flipped to `skipped`. `in_progress` siblings are NOT cancelled (no cancellation interface on cooperative async); they run to completion and their terminal write re-triggers the lifecycle eval.
-- **Workflow terminal** — evaluated in the same post-task transaction. `completed` when every task is terminal with no failures; `failed` when any task is terminal with a failure. `finalResult` is written eagerly in the same transaction, guarded by `WHERE finalResult IS NULL`.
-- **Skipped tasks produce no `Result` row** — the status itself is the explanation.
+The five entries below are the calls most likely to draw pushback. Each covers *what was done* / *why* / *production-grade alternative*. Complete trade-off bookkeeping (every per-task call) lives in `interview/archive/design_decisions.md`, with long-form rebuttals alongside.
 
 ### 5.1 No lease, no heartbeat on `in_progress` tasks
 
@@ -183,30 +147,31 @@ Full Issue #22 trail in `interview/archive/design_decisions.md` under `§Task 6`
 
 **Production-grade.** Same — strict HTTP semantics scale better across caller boundaries than overloaded payloads.
 
-### 5.6 Eager `finalResult` write + lazy patch on `/results` read
+## Misc.
 
-**What.** `finalResult` handling has two paths:
+### Task state transitions
 
-1. **Eager write.** Synthesized and written inside the post-task transaction that takes the workflow terminal, guarded by `WHERE finalResult IS NULL`.
-2. **Lazy patch.** If a terminal workflow has `finalResult IS NULL` at `/results` read time (rare race or pre-Wave-1 row), the read handler computes and persists it on the fly under the same idempotent guard via `applyLazyFinalResultPatch(...)`, reusing `synthesizeFinalResult(...)` verbatim — single source of truth for the payload shape.
+```mermaid
+stateDiagram-v2
+   
+    %% Workflow lifecycle
+    InProgress --> Completed : all tasks terminal (no failures)
+    InProgress --> Failed : any task fails → all non-terminal tasks swept to skipped
+    Completed --> [*]
+    Failed --> [*]
 
-The query handler never advances workflow lifecycle; lifecycle flips remain exclusively the runner's responsibility.
+    %% Task lifecycle (created directly into Queued or Waiting — no Initial state)
+    [*] --> Queued : no dependsOn, workflow created
+    [*] --> Waiting : has dependsOn, workflow created
 
-**Why.** Eager-write keeps `/results` a pure read on the happy path (no synthesis cost per call). The lazy patch is defense-in-depth against the race where a worker crashes between the status flip and the `finalResult` write.
+    Waiting --> Queued : all dependsOn completed (promotion sweep)
+    Queued --> InProgress : worker atomic UPDATE claim
+    InProgress --> Completed : job succeeded → Result.data saved
+    InProgress --> Failed : job threw → Result.error saved
+    Waiting --> Skipped : sibling failed (fail-fast sweep)
+    Queued --> Skipped : sibling failed (fail-fast sweep)
 
-**Production-grade.** Emit a domain event (`workflow.finalized`) when `finalResult` is written; downstream consumers subscribe instead of polling.
-
-### 5.7 Pushback → defense file
-
-| Pushback | Prepared defense |
-| --- | --- |
-| "Where's the lease / heartbeat / claim recovery?" | interview/archive/no-lease-and-heartbeat.md |
-| "Readme §1 says save to Task.output — why no column?" | interview/archive/no-task-output-column.md |
-| "Why coroutines on the event loop instead of worker_threads?" | interview/archive/coroutine-vs-thread.md |
-| "Why did DEFAULT_WORKER_POOL_SIZE flip 3 → 1 → 3?" | interview/archive/design_decisions.md §Task 7 + §Issue #17 |
-| "/results returning 400 for failed — that's an error code for a known outcome, no?" | interview/archive/design_decisions.md §Task 6 (Issue #22 supersession block) |
-| "Why fail-fast over continue-on-error?" | interview/archive/design_decisions.md §Task 3 |
-| "Why doesn't fail-fast cancel in_progress siblings?" | interview/archive/design_decisions.md §Task 3b-ii Wave 3 |
-| "Why is the report job's payload missing the README-example taskId field?" | interview/archive/design_decisions.md §Task 2 + §Decision 4 / US16 |
-| "Why is example_workflow.yml not exercising reportGeneration?" | interview/archive/design_decisions.md §Task 2 (last entry) |
-| "Why no graceful shutdown / SIGTERM drain?" | interview/archive/design_decisions.md §General Assumptions |
+    Completed --> [*]
+    Failed --> [*]
+    Skipped --> [*]
+```
