@@ -147,6 +147,91 @@ Full Issue #22 trail in `interview/archive/design_decisions.md` under `§Task 6`
 
 **Production-grade.** Same — strict HTTP semantics scale better across caller boundaries than overloaded payloads.
 
+## 5. System architecture
+
+### 5.1 Component map
+
+```mermaid
+flowchart LR
+    subgraph HTTP["HTTP API  (Express, single process)"]
+        H1["POST /analysis"]
+        H2["GET /workflow/:id/status"]
+        H3["GET /workflow/:id/results"]
+    end
+
+    subgraph Factory["WorkflowFactory  (synchronous, in-process)"]
+        YAML["YAML DAG definition"]
+        Validator["dependsOn validator"]
+        TX1["Insert Workflow + Tasks  (one transaction)"]
+    end
+
+    subgraph DB["SQLite  (file-backed, TypeORM synchronize:true)"]
+        WRow["Workflow table"]
+        TRow["Task table  (hot, polled)"]
+        RRow["Result table  (output blob)"]
+    end
+
+    subgraph Worker["Worker Pool  (coroutines on shared Node event loop)"]
+        WP1["worker loop 1<br/>(own DataSource + SQLite conn)"]
+        WP2["worker loop 2<br/>(own DataSource + SQLite conn)"]
+        WP3["worker loop N..."]
+        Claim["Atomic UPDATE claim"]
+        JobRun["JobFactory → concrete Job.run()"]
+        TX2["Result write + state transition  (one transaction)"]
+        Promote["Promotion / fail-fast sweep  (same TX2)"]
+    end
+
+    subgraph Jobs["Job implementations  (challenge scope: synchronous)"]
+        PA["PolygonAreaJob  (@turf/area)"]
+        RG["ReportGenerationJob  (aggregate upstream results)"]
+        DA["DataAnalysisJob"]
+        EN["EmailNotificationJob"]
+    end
+
+    H1 -->|creates workflow| Factory
+    Factory --> TX1
+    TX1 --> WRow
+    TX1 --> TRow
+    H2 -->|read| WRow
+    H2 -->|read| TRow
+    H3 -->|read + lazy-patch finalResult| WRow
+    H3 -->|read| RRow
+
+    WP1 & WP2 & WP3 -->|poll every 5s| TRow
+    WP1 & WP2 & WP3 --> Claim
+    Claim -->|updates status| TRow
+    Claim --> JobRun
+    JobRun --> PA & RG & DA & EN
+    JobRun --> TX2
+    TX2 --> RRow
+    TX2 --> TRow
+    TX2 --> Promote
+
+    style HTTP fill:#cde,stroke:#333
+    style Factory fill:#eef9e8,stroke:#333
+    style DB fill:#ffe,stroke:#333
+    style Worker fill:#fde,stroke:#333
+    style Jobs fill:#efe,stroke:#333
+```
+
+### 5.2 Production-grade upgrade path
+
+Each ⚠️ annotation above marks a challenge-scope solution with its production counterpart:
+
+| Component | Challenge scope | Production grade |
+|---|---|---|
+| **HTTP API** | Express, single Node process, in-process worker pool | Containerised deployment; HTTP API and worker pool are **separate processes / services** that communicate via a job queue (Bull, Celery, SQS). |
+| **Database** | SQLite with `synchronize: true`; wiped on every boot | **PostgreSQL** (or MySQL) with proper TypeORM migrations. WAL mode becomes unnecessary when a real DB handles concurrent connections. |
+| **Connection model** | Per-worker file-backed `DataSource` (WAL serialization at SQLite layer) | Connection pool per service (e.g. PgBouncer for PostgreSQL); each worker process has its **own pool**. |
+| **Worker polling** | `setTimeout` 5 s poll loop; `UPDATE … WHERE status = 'queued'` optimistic claim | **Pub/sub notifications** (PostgreSQL `LISTEN`/`NOTIFY`, Redis streams) eliminate polling latency and wasted cycles. |
+| **Job execution** | Synchronous `Job.run()` — CPU work blocks the event loop | CPU-bound jobs offloaded to **separate worker-threads进程** or an **out-of-process runner** (separate container/deployment). |
+| **Output storage** | `Result.data` is a SQLite `TEXT` column — adequate for small-to-medium JSON blobs | Large blobs move to **object storage** (S3, GCS); `Result.data` holds the object key. |
+| **Horizontal scaling** | N coroutines in one process | N worker **containers / pods**, each running a full worker pool, coordinated through the shared job queue. |
+| **Shutdown** | Best-effort SIGINT/SIGTERM handler; SQLite conns reaped on process exit | Graceful drain: finish in-flight jobs, acknowledge the queue broker, then exit. |
+| **Workflow factory** | Runs synchronously inside the HTTP request | Becomes a **workflow orchestration service** (Temporal, Prefect, Step Functions) that drives the DAG as a durable execution. |
+
+The core logic — the claim/schedule/run/commit/sweep transaction, the `dependsOn` DAG, the final-result synthesis, and the HTTP contract — is production-ready in shape. The upgrade is primarily a **deployment and infrastructure** swap.
+
 ## Misc.
 
 ### Task state transitions
