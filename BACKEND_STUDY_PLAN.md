@@ -106,6 +106,8 @@
 
 ### 6. `worker_threads` & Structured Cloning
 **Time:** ~1h
+**Status:** ✅ Completed
+**Session notes:** `study/BACKEND_STUDY_PLAN_6.md`
 **Why it matters:** If you ever need to offload CPU-bound work (polygon area calculations, PDF generation, image processing), `worker_threads` is Node's answer to multi-core utilization. Understanding structured cloning prevents subtle data corruption bugs.
 
 **What to study:**
@@ -124,6 +126,8 @@
 
 ### 7. Distributed NoSQL Consistency (ScyllaDB/Cassandra)
 **Time:** ~30–45m
+**Status:** ✅ Completed
+**Session notes:** `study/BACKEND_STUDY_PLAN_SUMMARY_7.md`
 **Why it matters:** Your data will be partitioned across a distributed NoSQL cluster. Partition key decisions are irreversible. You need to hold your own in data modeling discussions.
 
 **What to know:**
@@ -140,6 +144,8 @@
 
 ### 8. Message Queue Backpressure Patterns
 **Time:** ~30m
+**Status:** ✅ Completed
+**Session notes:** `study/BACKEND_STUDY_PLAN_SUMMARY_8.md`
 **Why it matters:** Jobs like "generate compliance report" or "send notification" are queued workers. Understanding prefetch, retry, and dead-letter semantics helps you design reliable job chains.
 
 **What to know:**
@@ -153,6 +159,8 @@
 
 ### 9. Event Loop Lag & Profiling
 **Time:** ~30m
+**Status:** ✅ Completed
+**Session notes:** `study/BACKEND_STUDY_PLAN_SUMMARY_9.md`
 **Why it matters:** When a worker appears to hang, it's usually event loop starvation. You need to be able to prove it with data.
 
 **What to know:**
@@ -167,6 +175,8 @@
 
 ### 10. GraphQL Subscriptions & WebSocket
 **Time:** ~30–45m
+**Status:** ✅ Completed
+**Session notes:** `study/BACKEND_STUDY_PLAN_SUMMARY_10.md`
 **Why it matters:** Concepually you know WebSocket; close the gap on server-side pub/sub so you can implement real-time job status updates.
 
 **What to know:**

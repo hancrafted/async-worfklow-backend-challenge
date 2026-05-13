@@ -97,6 +97,42 @@ For deeper plumbing — fixtures, helper signatures, archived per-task notes —
 
 The six entries below are the calls most likely to draw pushback. Each covers *what was done* / *why* / *production-grade alternative*. Complete trade-off bookkeeping (every per-task call) lives in `interview/archive/design_decisions.md`, with long-form rebuttals alongside.
 
+### 5.0 Task state transitions
+
+```mermaid
+stateDiagram-v2
+   
+    %% Workflow lifecycle
+    InProgress --> Completed : all tasks terminal (no failures)
+    InProgress --> Failed : any task fails → all non-terminal tasks swept to skipped
+    Completed --> [*]
+    Failed --> [*]
+
+    %% Task lifecycle (created directly into Queued or Waiting — no Initial state)
+    [*] --> Queued : no dependsOn, workflow created
+    [*] --> Waiting : has dependsOn, workflow created
+
+    Waiting --> Queued : all dependsOn completed (promotion sweep)
+    Queued --> InProgress : worker atomic UPDATE claim
+    InProgress --> Completed : job succeeded → Result.data saved
+    InProgress --> Failed : job threw → Result.error saved
+    Waiting --> Skipped : sibling failed (fail-fast sweep)
+    Queued --> Skipped : sibling failed (fail-fast sweep)
+
+    Completed --> [*]
+    Failed --> [*]
+    Skipped --> [*]
+```
+
+**Key transition rules (PRD §Decisions 2, 3, 8, 9):**
+
+- **Workflow `Initial`** — set when the workflow is created. Only the workflow has an `Initial` state; tasks are created directly as `Queued` (no deps) or `Waiting` (has deps).
+- **Claim + bump** — the same transaction that flips `task: queued→in_progress` also flips `workflow: initial→in_progress` (idempotent `WHERE status='initial'`).
+- **Promotion** — after a task completes, every `waiting` task whose entire `dependsOn` set is now `completed` is flipped to `queued` in a guarded UPDATE. This unblocks dependents so the worker pool can pick them up.
+- **Fail-fast sweep** — when any task fails, every `waiting`/`queued` sibling in the entire workflow is atomically flipped to `skipped`. `in_progress` siblings are NOT cancelled (no cancellation interface on cooperative async); they run to completion and their terminal write re-triggers the lifecycle eval.
+- **Workflow terminal** — evaluated in the same post-task transaction. `completed` when every task is terminal with no failures; `failed` when any task is terminal with a failure. `finalResult` is written eagerly in the same transaction, guarded by `WHERE finalResult IS NULL`.
+- **Skipped tasks produce no `Result` row** — the status itself is the explanation.
+
 ### 5.1 No lease, no heartbeat on `in_progress` tasks
 
 **What.** The atomic claim is a single `UPDATE tasks SET status = 'in_progress' WHERE taskId = ? AND status = 'queued'`. No `claimedAt`, no `leaseExpiresAt`, no heartbeat goroutine, no boot-time recovery sweep.
