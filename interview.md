@@ -214,27 +214,7 @@ flowchart LR
     style Jobs fill:#efe,stroke:#333
 ```
 
-### 5.2 Production-grade upgrade path
-
-Each ⚠️ annotation above marks a challenge-scope solution with its production counterpart:
-
-| Component | Challenge scope | Production grade |
-|---|---|---|
-| **HTTP API** | Express, single Node process, in-process worker pool | Containerised deployment; HTTP API and worker pool are **separate processes / services** that communicate via a job queue (Bull, Celery, SQS). |
-| **Database** | SQLite with `synchronize: true`; wiped on every boot | **PostgreSQL** (or MySQL) with proper TypeORM migrations. WAL mode becomes unnecessary when a real DB handles concurrent connections. |
-| **Connection model** | Per-worker file-backed `DataSource` (WAL serialization at SQLite layer) | Connection pool per service (e.g. PgBouncer for PostgreSQL); each worker process has its **own pool**. |
-| **Worker polling** | `setTimeout` 5 s poll loop; `UPDATE … WHERE status = 'queued'` optimistic claim | **Pub/sub notifications** (PostgreSQL `LISTEN`/`NOTIFY`, Redis streams) eliminate polling latency and wasted cycles. |
-| **Job execution** | Synchronous `Job.run()` — CPU work blocks the event loop | CPU-bound jobs offloaded to **separate worker-threads进程** or an **out-of-process runner** (separate container/deployment). |
-| **Output storage** | `Result.data` is a SQLite `TEXT` column — adequate for small-to-medium JSON blobs | Large blobs move to **object storage** (S3, GCS); `Result.data` holds the object key. |
-| **Horizontal scaling** | N coroutines in one process | N worker **containers / pods**, each running a full worker pool, coordinated through the shared job queue. |
-| **Shutdown** | Best-effort SIGINT/SIGTERM handler; SQLite conns reaped on process exit | Graceful drain: finish in-flight jobs, acknowledge the queue broker, then exit. |
-| **Workflow factory** | Runs synchronously inside the HTTP request | Becomes a **workflow orchestration service** (Temporal, Prefect, Step Functions) that drives the DAG as a durable execution. |
-
-The core logic — the claim/schedule/run/commit/sweep transaction, the `dependsOn` DAG, the final-result synthesis, and the HTTP contract — is production-ready in shape. The upgrade is primarily a **deployment and infrastructure** swap.
-
-## Misc.
-
-### Task state transitions
+### 5.2 Task state transitions
 
 ```mermaid
 stateDiagram-v2
